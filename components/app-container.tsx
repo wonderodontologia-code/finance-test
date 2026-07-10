@@ -57,6 +57,28 @@ export default function AppContainer() {
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
   }, [])
 
+  const handleRenameCharacter = useCallback((id: string) => {
+    const character = characters.find(c => c.id === id)
+    if (!character) return
+    const nextName = window.prompt('Novo nome do personagem:', character.name)?.trim()
+    if (!nextName || nextName === character.name) return
+    setCharacters(prev => prev.map(c => c.id === id ? { ...c, name: nextName } : c))
+    setGameEvents([`${character.name} agora se chama ${nextName}.`])
+  }, [characters])
+
+  const handleDeleteCharacter = useCallback((id: string) => {
+    const character = characters.find(c => c.id === id)
+    if (!character) return
+    const confirmed = window.confirm(`Deletar "${character.name}"? Essa ação remove o personagem deste dispositivo. Exporte um backup antes se quiser guardar o histórico.`)
+    if (!confirmed) return
+    setCharacters(prev => prev.filter(c => c.id !== id))
+    setSelectedCharacterId(current => current === id ? null : current)
+    setRitualCharacterId(current => current === id ? null : current)
+    setBossCharacterId(current => current === id ? null : current)
+    setCurrentPage('guild')
+    setGameEvents([`${character.name} foi removido da Guilda.`])
+  }, [characters])
+
   const handleLogin = (name: string) => {
     setUserName(name)
     const state = loadState()
@@ -192,6 +214,8 @@ export default function AppContainer() {
             setCurrentPage('character-detail')
           }}
           onOpenRitual={(id) => setRitualCharacterId(id)}
+          onRenameCharacter={handleRenameCharacter}
+          onDeleteCharacter={handleDeleteCharacter}
           onExportBackup={handleExportBackup}
           onImportBackup={handleImportBackup}
           onLogout={handleLogout}
@@ -203,6 +227,8 @@ export default function AppContainer() {
           character={selectedCharacter}
           onBack={() => setCurrentPage('guild')}
           onUpdateCharacter={updateCharacter}
+          onRenameCharacter={() => handleRenameCharacter(selectedCharacter.id)}
+          onDeleteCharacter={() => handleDeleteCharacter(selectedCharacter.id)}
           onOpenRitual={() => setRitualCharacterId(selectedCharacter.id)}
         />
       )}

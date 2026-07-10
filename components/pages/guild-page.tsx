@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef } from 'react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
@@ -19,6 +20,8 @@ interface GuildPageProps {
   onAddCharacter: () => void
   onSelectCharacter: (id: string) => void
   onOpenRitual: (id: string) => void
+  onRenameCharacter: (id: string) => void
+  onDeleteCharacter: (id: string) => void
   onExportBackup: () => void
   onImportBackup: (file: File) => void
   onLogout?: () => void
@@ -37,10 +40,14 @@ function CharacterCard({
   character,
   onSelect,
   onRitual,
+  onRename,
+  onDelete,
 }: {
   character: Character
   onSelect: () => void
   onRitual: () => void
+  onRename: () => void
+  onDelete: () => void
 }) {
   const classDef = CLASSES.find(c => c.id === character.class)!
   const classImage = classImageForLevel(classDef, character.level)
@@ -165,7 +172,7 @@ function CharacterCard({
       </button>
 
       {/* Action */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 space-y-2">
         <Button
           onClick={(e) => { e.stopPropagation(); onRitual() }}
           className={`w-full text-sm ${registeredToday ? 'bg-muted text-foreground border border-border hover:bg-muted/80' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
@@ -173,6 +180,28 @@ function CharacterCard({
         >
           {registeredToday ? 'Editar Registro de Hoje' : 'Ritual de Registro'}
         </Button>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={(e) => { e.stopPropagation(); onRename() }}
+            className="gap-2"
+          >
+            <Pencil className="size-4" aria-hidden="true" />
+            Renomear
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+            Deletar
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -184,6 +213,8 @@ export default function GuildPage({
   onAddCharacter,
   onSelectCharacter,
   onOpenRitual,
+  onRenameCharacter,
+  onDeleteCharacter,
   onExportBackup,
   onImportBackup,
   onLogout,
@@ -305,6 +336,8 @@ export default function GuildPage({
                   character={character}
                   onSelect={() => onSelectCharacter(character.id)}
                   onRitual={() => onOpenRitual(character.id)}
+                  onRename={() => onRenameCharacter(character.id)}
+                  onDelete={() => onDeleteCharacter(character.id)}
                 />
               ))}
             </div>

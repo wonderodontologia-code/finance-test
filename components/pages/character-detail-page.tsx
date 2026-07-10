@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Home, Lock, MapPin, Search, X } from 'lucide-react'
+import { Home, Lock, MapPin, Pencil, Search, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
@@ -62,6 +62,8 @@ interface CharacterDetailPageProps {
   character: Character
   onBack: () => void
   onUpdateCharacter: (updated: Character) => void
+  onRenameCharacter: () => void
+  onDeleteCharacter: () => void
   onOpenRitual: () => void
 }
 
@@ -154,7 +156,7 @@ function routePoint(fromId: ExplorationLocationId, toId: ExplorationLocationId, 
   }
 }
 
-export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onOpenRitual }: CharacterDetailPageProps) {
+export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onRenameCharacter, onDeleteCharacter, onOpenRitual }: CharacterDetailPageProps) {
   const [activeTab, setActiveTab] = useState<'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'>('stats')
   const [tooltipAttr, setTooltipAttr] = useState<string | null>(null)
   const [editingMarker, setEditingMarker] = useState(false)
@@ -436,6 +438,24 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
             <p className="font-bold text-foreground truncate">{character.name}</p>
             <p className="text-xs text-muted-foreground">{classDef.name} · {character.category}</p>
           </div>
+          <button
+            type="button"
+            onClick={onRenameCharacter}
+            className="grid size-8 shrink-0 place-items-center rounded border border-border bg-black/35 text-muted-foreground hover:text-foreground"
+            aria-label="Renomear personagem"
+            title="Renomear"
+          >
+            <Pencil className="size-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onDeleteCharacter}
+            className="grid size-8 shrink-0 place-items-center rounded border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
+            aria-label="Deletar personagem"
+            title="Deletar"
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+          </button>
           <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded font-medium">
             Nv. {character.level}
           </span>
