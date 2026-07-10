@@ -1,0 +1,199 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  color-scheme: dark;
+  --background: #070707;
+  --foreground: #f1ead8;
+  --card: #111111;
+  --card-foreground: #f1ead8;
+  --popover: #121212;
+  --popover-foreground: #f1ead8;
+  --primary: #d6a933;
+  --primary-foreground: #090806;
+  --secondary: #b88622;
+  --secondary-foreground: #090806;
+  --muted: #1f1f1f;
+  --muted-foreground: #a5a09a;
+  --accent: #d6a933;
+  --accent-foreground: #090806;
+  --destructive: #a4483d;
+  --border: #2c2a26;
+  --input: #171717;
+  --ring: #d6a933;
+  --chart-1: #d6a933;
+  --chart-2: #8e7429;
+  --chart-3: #5a554a;
+  --chart-4: #2f2f2f;
+  --chart-5: #efe0a0;
+  --radius: 0.375rem;
+  --sidebar: #0d0d0d;
+  --sidebar-foreground: #f1ead8;
+  --sidebar-primary: #d6a933;
+  --sidebar-primary-foreground: #090806;
+  --sidebar-accent: #171717;
+  --sidebar-accent-foreground: #d6a933;
+  --sidebar-border: #2c2a26;
+  --sidebar-ring: #d6a933;
+}
+
+:root,
+.dark,
+:root:not(.light) {
+  color-scheme: dark;
+  --background: #070707;
+  --foreground: #f1ead8;
+  --card: #111111;
+  --card-foreground: #f1ead8;
+  --popover: #121212;
+  --popover-foreground: #f1ead8;
+  --primary: #d6a933;
+  --primary-foreground: #090806;
+  --secondary: #b88622;
+  --secondary-foreground: #090806;
+  --muted: #1f1f1f;
+  --muted-foreground: #a5a09a;
+  --accent: #d6a933;
+  --accent-foreground: #090806;
+  --destructive: #a4483d;
+  --border: #2c2a26;
+  --input: #171717;
+  --ring: #d6a933;
+  --chart-1: #d6a933;
+  --chart-2: #8e7429;
+  --chart-3: #5a554a;
+  --chart-4: #2f2f2f;
+  --chart-5: #efe0a0;
+  --radius: 0.375rem;
+  --sidebar: #0d0d0d;
+  --sidebar-foreground: #f1ead8;
+  --sidebar-primary: #d6a933;
+  --sidebar-primary-foreground: #090806;
+  --sidebar-accent: #171717;
+  --sidebar-accent-foreground: #d6a933;
+  --sidebar-border: #2c2a26;
+  --sidebar-ring: #d6a933;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    background: #070707;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 50% -10%, rgba(214, 169, 51, 0.14), transparent 36rem),
+      radial-gradient(circle at 10% 10%, rgba(255, 226, 128, 0.08), transparent 24rem),
+      linear-gradient(180deg, #0b0b0b 0%, #070707 44%, #0e0e0e 100%);
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      radial-gradient(circle at center, transparent 0, rgba(0, 0, 0, 0.58) 75%);
+    background-size: 42px 42px, 42px 42px, 100% 100%;
+    mix-blend-mode: screen;
+  }
+  ::selection {
+    color: #090806;
+    background: #d6a933;
+  }
+  input,
+  select,
+  textarea {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -1px 0 rgba(0, 0, 0, 0.65);
+  }
+  input[type='date'] {
+    color-scheme: dark;
+  }
+}
+
+@layer components {
+  .dungeon-panel {
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+      linear-gradient(135deg, rgba(214, 169, 51, 0.07), transparent 34%),
+      var(--card);
+    box-shadow:
+      0 20px 50px rgba(0, 0, 0, 0.48),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.72);
+  }
+  .gold-frame {
+    border-color: rgba(214, 169, 51, 0.46);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.8),
+      0 0 28px rgba(214, 169, 51, 0.11),
+      inset 0 0 0 1px rgba(255, 231, 150, 0.07);
+  }
+  .rpg-title {
+    color: #f7df8a;
+    text-shadow:
+      0 2px 0 #1b1406,
+      0 0 24px rgba(214, 169, 51, 0.34);
+  }
+  .rune-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(214, 169, 51, 0.75), transparent);
+  }
+  .torch-glow {
+    box-shadow: 0 0 28px rgba(214, 169, 51, 0.22), inset 0 0 18px rgba(214, 169, 51, 0.08);
+  }
+  .coin-sheen {
+    background-image: linear-gradient(135deg, #8f6a18 0%, #f1d474 42%, #a97b1b 76%, #ffebb0 100%);
+  }
+}
