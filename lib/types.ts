@@ -61,6 +61,24 @@ export interface CheckinReward {
   itemGained?: ConsumableItemId
 }
 
+export type CharacterEventLogType =
+  | 'missed_day'
+  | 'damage'
+  | 'death'
+  | 'last_breath'
+  | 'regen'
+  | 'boss_ready'
+  | 'system'
+
+export interface CharacterEventLogEntry {
+  id: string
+  type: CharacterEventLogType
+  date: string
+  message: string
+  damage?: number
+  lifeAfter?: number
+}
+
 export interface ExplorationReward {
   type: ExplorationRewardType
   label: string
@@ -114,6 +132,7 @@ export interface Character {
   name: string
   class: CharacterClass
   category: Category
+  createdAt: string
   // Ciclo atual
   cycleStart: string
   cycleEnd: string
@@ -142,6 +161,8 @@ export interface Character {
   battleLog: BattleLog[]
   lastCheckinAt?: string
   exploration: ExplorationState
+  deathCount: number
+  eventLog: CharacterEventLogEntry[]
   // Persistência / ciclo
   lastProcessedDate?: string
   goldChest?: number // Baú do Ouro Preservado acumulado
@@ -668,8 +689,10 @@ export function calcEffectiveAttributes(character: Character): Attributes {
 }
 
 export function normalizeCharacter(character: Character): Character {
+  const createdAt = character.createdAt ?? new Date().toISOString()
   return {
     ...character,
+    createdAt,
     inventory: character.inventory ?? [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS, ...(character.equipmentLevels ?? {}) },
     battleLog: character.battleLog ?? [],
@@ -680,6 +703,8 @@ export function normalizeCharacter(character: Character): Character {
       activeJourney: character.exploration?.activeJourney,
       lastReward: character.exploration?.lastReward,
     },
+    deathCount: character.deathCount ?? 0,
+    eventLog: character.eventLog ?? [],
     goldChest: character.goldChest ?? 0,
   }
 }
@@ -771,6 +796,7 @@ export function createCharacter(params: {
     name: params.name,
     class: params.class,
     category: params.category,
+    createdAt: new Date().toISOString(),
     cycleStart: params.cycleStart,
     cycleEnd: params.cycleEnd,
     maxTreasure: params.maxTreasure,
@@ -798,6 +824,8 @@ export function createCharacter(params: {
       currentLocationId: CASTLE_LOCATION_ID,
       completedLocationIds: [],
     },
+    deathCount: 0,
+    eventLog: [],
     goldChest: 0,
     cycleHistory: [],
   }

@@ -89,6 +89,9 @@ function CharacterCard({
           <div className="shrink-0 text-right">
             <p className="text-xs font-bold text-foreground">Nv. {character.level}</p>
             <p className="text-xs text-muted-foreground">{levelTitle(character.level)}</p>
+            {(character.deathCount ?? 0) > 0 && (
+              <p className="mt-1 text-[11px] font-semibold text-destructive">Mortes: {character.deathCount}</p>
+            )}
           </div>
         </div>
 

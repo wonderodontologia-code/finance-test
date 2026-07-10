@@ -1,6 +1,7 @@
 import {
   type Character,
   type CheckinReward,
+  type CharacterEventLogEntry,
   type ConsumableItemId,
   type EquipmentSlot,
   type ExplorationLocationId,
@@ -44,6 +45,30 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0]
 }
 
+function maxISODate(a: string, b: string): string {
+  return a > b ? a : b
+}
+
+function createdDate(char: Character): string {
+  const created = char.createdAt ? new Date(char.createdAt) : new Date()
+  if (Number.isNaN(created.getTime())) return todayISO()
+  return created.toISOString().split('T')[0]
+}
+
+function appendEventLog(
+  char: Character,
+  entry: Omit<CharacterEventLogEntry, 'id'>
+): Character {
+  const id = `${entry.date}-${entry.type}-${Math.random().toString(36).slice(2, 8)}`
+  return {
+    ...char,
+    eventLog: [
+      { id, ...entry },
+      ...(char.eventLog ?? []),
+    ].slice(0, 120),
+  }
+}
+
 function daysBetween(start: string, end: string): string[] {
   const result: string[] = []
   let current = start
@@ -81,6 +106,7 @@ function handleDeath(char: Character): Character {
   const classDef = CLASSES.find(c => c.id === char.class)!
   const attrs = { ...classDef.startingAttributes }
   const maxLife = calcMaxLife(1, attrs, classDef)
+  const goldChest = char.goldChest ?? 0
   return {
     ...char,
     level: 1,
@@ -91,6 +117,21 @@ function handleDeath(char: Character): Character {
     life: maxLife,
     maxLife,
     combo: 0,
+    bestCombo: 0,
+    specialUsed: false,
+    lastBreathUsed: false,
+    sealUsed: false,
+    masterStrikeUsedThisWeek: false,
+    inventory: [],
+    equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
+    battleLog: [],
+    lastCheckinAt: undefined,
+    exploration: {
+      currentLocationId: CASTLE_LOCATION_ID,
+      completedLocationIds: [],
+    },
+    deathCount: (char.deathCount ?? 0) + 1,
+    goldChest,
     lastBreathRecoveryDays: 0,
   }
 }
@@ -119,7 +160,7 @@ function applyMissedDay(char: Character): { character: Character; event: GameEve
   } else if (newLife <= 0) {
     updated = handleDeath(updated)
     eventType = 'death'
-    message = `${char.name} caiu em batalha. Voltou ao nível 1, mas o histórico financeiro foi preservado.`
+    message = `${char.name} caiu pela Maldição do Esquecimento. Voltou ao nível 1; itens e equipamentos foram perdidos, mas o Baú foi preservado.`
   }
 
   return {
@@ -149,9 +190,11 @@ export function processDailyChecks(characters: Character[]): { characters: Chara
     if (yesterday < char.cycleStart) return char
 
     const processUntil = yesterday < char.cycleEnd ? yesterday : char.cycleEnd
-    const startFrom = char.lastProcessedDate
-      ? addDays(char.lastProcessedDate, 1)
-      : char.cycleStart
+    const firstTrackableDate = maxISODate(char.cycleStart, createdDate(char))
+    const startFrom = maxISODate(
+      char.lastProcessedDate ? addDays(char.lastProcessedDate, 1) : firstTrackableDate,
+      firstTrackableDate
+    )
 
     if (startFrom > processUntil) return char
 
@@ -161,7 +204,13 @@ export function processDailyChecks(characters: Character[]): { characters: Chara
       const hasRecord = current.dailyRecords.some(r => r.date === day && r.registered)
       if (!hasRecord) {
         const result = applyMissedDay(current)
-        current = result.character
+        current = appendEventLog(result.character, {
+          type: result.event.type === 'missed_day' ? 'missed_day' : result.event.type,
+          date: `${day}T12:00:00.000Z`,
+          message: result.event.message,
+          damage: result.event.damage,
+          lifeAfter: result.character.life,
+        })
         events.push(result.event)
       } else if (current.lastBreathRecoveryDays !== undefined && current.lastBreathUsed && current.life === 1) {
         // Recovery mission for Guerreiro
@@ -175,6 +224,12 @@ export function processDailyChecks(characters: Character[]): { characters: Chara
             lastBreathRecoveryDays: 0,
             lastBreathUsed: true,
           }
+          current = appendEventLog(current, {
+            type: 'regen',
+            date: `${day}T12:00:00.000Z`,
+            message: `${current.name} completou a missão de recuperação! +${regen} vida.`,
+            lifeAfter: current.life,
+          })
           events.push({
             type: 'regen',
             characterId: current.id,
@@ -867,6 +922,15 @@ export function performBattle(char: Character): BattleResult {
     ...current,
     life: Math.max(0, current.life - reduced),
   }, lossXp)
+  if (reduced > 0) {
+    current = appendEventLog(current, {
+      type: 'damage',
+      date: new Date().toISOString(),
+      message: `${current.name} sofreu ${reduced} de dano real ao perder uma batalha contra ${monsterName}.`,
+      damage: reduced,
+      lifeAfter: current.life,
+    })
+  }
 
   return {
     character: current,

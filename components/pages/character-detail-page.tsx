@@ -120,6 +120,26 @@ function explorationRewardTitle(reward: ExplorationReward): string {
   return 'Conhecimento encontrado'
 }
 
+function eventLogLabel(type: string): string {
+  const labels: Record<string, string> = {
+    missed_day: 'Esquecimento',
+    damage: 'Dano',
+    death: 'Morte',
+    last_breath: 'Último Fôlego',
+    regen: 'Recuperação',
+    boss_ready: 'Boss Final',
+    system: 'Sistema',
+  }
+  return labels[type] ?? 'Evento'
+}
+
+function eventLogColor(type: string): string {
+  if (type === 'death') return 'text-destructive border-destructive/40 bg-destructive/10'
+  if (type === 'missed_day' || type === 'damage') return 'text-secondary border-secondary/40 bg-secondary/10'
+  if (type === 'regen' || type === 'last_breath') return 'text-primary border-primary/40 bg-primary/10'
+  return 'text-muted-foreground border-border bg-black/35'
+}
+
 function locationById(locationId: ExplorationLocationId) {
   return EXPLORATION_LOCATIONS.find(location => location.id === locationId) ?? EXPLORATION_LOCATIONS[0]
 }
@@ -498,6 +518,16 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
             </span>
             <span className={`font-bold ${character.combo >= 7 ? 'text-secondary' : character.combo >= 3 ? 'text-primary' : 'text-muted-foreground'}`}>
               {character.combo} {character.combo >= 14 ? '— Lendário' : character.combo >= 7 ? '— Épico' : character.combo >= 3 ? '— Ativo' : '— Inativo'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between rounded border border-border bg-black/35 p-3 text-sm">
+            <span className="text-muted-foreground">
+              Mortes do personagem
+              <InfoTooltip text="Quando o personagem morre, ele volta ao nível 1 e perde itens, equipamentos e progresso de exploração. O Baú do Ouro Preservado continua intacto." />
+            </span>
+            <span className={`font-bold ${(character.deathCount ?? 0) > 0 ? 'text-destructive' : 'text-foreground'}`}>
+              {character.deathCount ?? 0}
             </span>
           </div>
 
@@ -1372,6 +1402,49 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
         {/* Tab: Histórico */}
         {activeTab === 'history' && (
           <div className="space-y-4">
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Log Geral</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Eventos importantes para auditar dano, esquecimentos, recuperações e mortes.
+                  </p>
+                </div>
+                <span className="shrink-0 rounded border border-border bg-black/35 px-2 py-1 text-xs text-muted-foreground">
+                  Mortes: {character.deathCount ?? 0}
+                </span>
+              </div>
+
+              {(character.eventLog ?? []).length === 0 ? (
+                <p className="rounded border border-border bg-black/35 p-3 text-sm text-muted-foreground">
+                  Nenhum evento importante registrado ainda.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(character.eventLog ?? []).slice(0, 25).map(entry => (
+                    <div key={entry.id} className="rounded border border-border bg-black/35 p-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className={`rounded border px-2 py-0.5 text-[11px] font-bold ${eventLogColor(entry.type)}`}>
+                          {eventLogLabel(entry.type)}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {new Date(entry.date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-foreground">{entry.message}</p>
+                      {(entry.damage !== undefined || entry.lifeAfter !== undefined) && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {entry.damage !== undefined ? `Dano: ${entry.damage}` : ''}
+                          {entry.damage !== undefined && entry.lifeAfter !== undefined ? ' · ' : ''}
+                          {entry.lifeAfter !== undefined ? `Vida depois: ${entry.lifeAfter}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
             {character.cycleHistory.length === 0 ? (
               <div className="dungeon-panel bg-card border border-border rounded-lg p-8 text-center">
                 <p className="font-semibold text-foreground mb-1">Sem histórico ainda</p>
