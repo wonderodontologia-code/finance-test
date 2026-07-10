@@ -152,10 +152,10 @@ export interface Character {
   dailyRecords: DailyRecord[]
   combo: number               // Combo de Disciplina atual
   bestCombo: number
-  specialUsed: boolean        // habilidade especial já usada no ciclo
-  lastBreathUsed: boolean     // Último Fôlego (Guerreiro) — só 1x por ciclo
-  sealUsed: boolean           // Selo da Exceção (Mago)
-  masterStrikeUsedThisWeek: boolean // Golpe de Mestre (Sombra do Saldo)
+  specialUsed: boolean        // legado de versões antigas; sem uso ativo
+  lastBreathUsed: boolean     // legado de versões antigas; sem uso ativo
+  sealUsed: boolean           // legado de versões antigas; sem uso ativo
+  masterStrikeUsedThisWeek: boolean // legado de versões antigas; sem uso ativo
   inventory: InventoryItem[]
   equipmentLevels: EquipmentLevels
   battleLog: BattleLog[]
@@ -166,7 +166,7 @@ export interface Character {
   // Persistência / ciclo
   lastProcessedDate?: string
   goldChest?: number // Baú do Ouro Preservado acumulado
-  lastBreathRecoveryDays?: number // missão de recuperação do Guerreiro
+  lastBreathRecoveryDays?: number // legado de versões antigas; sem uso ativo
   // Histórico
   cycleHistory: CycleHistory[]
 }
@@ -180,8 +180,6 @@ export interface ClassDefinition {
   style: string
   description: string
   bonuses: string[]
-  specialName: string
-  specialDescription: string
   idealFor: string[]
   imageSrc: string
   imageStages: ClassImageStage[]
@@ -203,15 +201,12 @@ export const CLASSES: ClassDefinition[] = [
     subtitle: 'Tanque — resistente e constante',
     style: 'Vida alta, aguenta melhor os erros. Ideal para iniciantes.',
     description:
-      'O Guerreiro do Cofre é a classe mais resistente do Reino. Com mais vida máxima e menor dano por esquecimento, ele aguenta melhor os dias em que o controle falha. A habilidade especial Último Fôlego dá uma segunda chance antes da morte — bom para quem está aprendendo o hábito de registrar.',
+      'O Guerreiro do Cofre é a classe mais resistente do Reino. Com mais vida máxima e menor dano por esquecimento, ele aguenta melhor os dias em que o controle falha — bom para quem está aprendendo o hábito de registrar.',
     bonuses: [
       '+30% de vida máxima',
       '-10% de dano por esquecimento (Maldição do Esquecimento)',
       'Regeneração de vida ligeiramente maior',
     ],
-    specialName: 'Último Fôlego',
-    specialDescription:
-      'Uma vez por ciclo, se a vida chegar a zero, o Guerreiro não morre imediatamente. Ele fica com 1 ponto de vida e ativa uma missão de recuperação: registrar gastos por 3 dias seguidos. Se completar, recupera parte da vida. Se falhar, morre de verdade.',
     idealFor: ['Cartão de crédito', 'Mercado / supermercado', 'Categorias difíceis de controlar', 'Usuários iniciantes'],
     imageSrc: '/classes/guerreiro-do-cofre.png',
     imageStages: [
@@ -230,15 +225,12 @@ export const CLASSES: ClassDefinition[] = [
     subtitle: 'Estrategista — XP e multiplicadores',
     style: 'Inteligência, bônus e planejamento. Ideal para otimizadores.',
     description:
-      'O Mago do Orçamento é a classe estratégica. Ganha mais XP por registro e por economia diária, e tem um multiplicador melhor ao fechar o ciclo abaixo do limite. A habilidade especial Selo da Exceção permite marcar um dia como exceção planejada — sem perder combo, sem tomar dano.',
+      'O Mago do Orçamento é a classe estratégica. Ganha mais XP por registro e por economia diária, e tem um multiplicador melhor ao fechar o ciclo abaixo do limite.',
     bonuses: [
       '+15% de XP por registro diário',
       '+20% de XP bônus por economia diária (Ouro Preservado do Dia)',
       'Multiplicador final melhor se fechar abaixo do Tesouro Máximo',
     ],
-    specialName: 'Selo da Exceção',
-    specialDescription:
-      'Uma vez por ciclo, o Mago pode marcar um dia como exceção planejada (viagem, aniversário, emergência). Nesse dia: não toma dano por não registrar, não quebra o Combo de Disciplina, mas também não ganha XP bônus.',
     idealFor: ['Alimentação / comida', 'Lazer', 'Compras pessoais', 'Categorias com muita variação'],
     imageSrc: '/classes/mago-do-orcamento.png',
     imageStages: [
@@ -257,15 +249,12 @@ export const CLASSES: ClassDefinition[] = [
     subtitle: 'Oportunista — sequências e bônus agressivos',
     style: 'Rápido, focado em economia. Ideal para quem quer cortar gastos.',
     description:
-      'A Sombra do Saldo é focada em sequências e economia agressiva. Ganha muito XP quando gasta menos da metade da Cota de Jornada e sobe o Combo de Disciplina mais rápido. A habilidade Golpe de Mestre dobra o XP bônus uma vez por semana nos dias de gasto muito baixo.',
+      'A Sombra do Saldo é focada em sequências e economia agressiva. Ganha muito XP quando gasta menos da metade da Cota de Jornada e sobe o Combo de Disciplina mais rápido.',
     bonuses: [
       '+25% de XP quando gasta menos de 50% da Cota de Jornada',
       'Combo de Disciplina sobe mais rápido',
       'Chance de recompensas extras em dias de gasto zero (futuramente)',
     ],
-    specialName: 'Golpe de Mestre',
-    specialDescription:
-      'Uma vez por semana, se o gasto do dia for menor que 50% da Cota de Jornada, a Sombra do Saldo dobra o XP bônus daquele dia. Exemplo: Cota de Jornada R$ 150, gastou R$ 40 → XP bônus é dobrado.',
     idealFor: ['Delivery / comida', 'Compras impulsivas', 'Lazer', 'Pequenos gastos recorrentes'],
     imageSrc: '/classes/sombra-do-saldo.png',
     imageStages: [

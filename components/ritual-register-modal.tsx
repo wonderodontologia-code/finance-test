@@ -40,11 +40,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
     character.combo >= 7  ? 1.10 :
     character.combo >= 3  ? 1.05 : 1.0
 
-  const shadowDoubles = character.class === 'ladino' && !character.masterStrikeUsedThisWeek && amountNum < quota * 0.5 && amountNum >= 0 && amount !== ''
-
-  // Apply Sombra do Saldo Golpe de Mestre doubling to bonus
-  let bonusXP = xpBreakdown.bonus
-  if (shadowDoubles) bonusXP *= 2
+  const bonusXP = xpBreakdown.bonus
   const totalXP = Math.round((xpBreakdown.base + xpBreakdown.daily + bonusXP) * comboMult)
 
   const savedToday = Math.max(0, quota - amountNum)
@@ -123,9 +119,6 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
       const newCombo = character.combo + 1
       const newBestCombo = Math.max(character.bestCombo, newCombo)
 
-      // 5. Sombra do Saldo: mark master strike used this week
-      const masterStrikeUsedThisWeek = shadowDoubles ? true : character.masterStrikeUsedThisWeek
-
       const updated: Character = {
         ...character,
         dailyRecords: [...character.dailyRecords, updatedRecord],
@@ -136,7 +129,6 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
         life: newLife,
         combo: newCombo,
         bestCombo: newBestCombo,
-        masterStrikeUsedThisWeek,
       }
 
       onConfirm(updated)
@@ -201,12 +193,6 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Combo de Disciplina ({Math.round((comboMult - 1) * 100)}% extra)</span>
                     <span className="font-semibold text-primary">x{comboMult.toFixed(2)}</span>
-                  </div>
-                )}
-                {shadowDoubles && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Golpe de Mestre (Sombra do Saldo)</span>
-                    <span className="font-semibold text-accent">x2 bônus</span>
                   </div>
                 )}
                 <div className="border-t border-border pt-2 flex justify-between font-bold">
@@ -304,10 +290,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
                 </div>
                 {xpBreakdown.bonus > 0 ? (
                   <div className="flex justify-between text-secondary">
-                    <span>
-                      Ouro Preservado do Dia
-                      {shadowDoubles && <span className="ml-1 text-accent font-semibold">(Golpe de Mestre x2)</span>}
-                    </span>
+                    <span>Ouro Preservado do Dia</span>
                     <span>+{bonusXP}</span>
                   </div>
                 ) : overQuota ? (

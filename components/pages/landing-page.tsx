@@ -69,7 +69,7 @@ export default function LandingPage({ onStartAdventure }: { onStartAdventure: ()
       {/* Example Character */}
       <section className="px-4 py-20 bg-black/30">
         <div className="max-w-3xl mx-auto">
-          <h2 className="rpg-title text-4xl font-bold text-center mb-12">Exemplo: O Dragão da Fatura</h2>
+          <h2 className="rpg-title text-4xl font-bold text-center mb-12">Exemplo: Aldric da Fatura</h2>
           
           <div className="dungeon-panel gold-frame border-2 rounded-lg p-8">
             <div className="grid md:grid-cols-2 gap-8 mb-8">
@@ -106,7 +106,7 @@ export default function LandingPage({ onStartAdventure }: { onStartAdventure: ()
 
             <div className="bg-black/50 rounded p-4 border border-border">
               <p className="text-foreground italic">
-                "O Dragão da Fatura está pronto para iniciar a jornada. Registre seus gastos diariamente para mantê-lo vivo."
+                "Aldric da Fatura está pronto para iniciar a jornada. Registre seus gastos diariamente para mantê-lo vivo."
               </p>
             </div>
           </div>

@@ -118,13 +118,22 @@ export default function OnboardingPage({ onCharacterCreated, userName }: Onboard
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Ex: Dragão da Fatura, Goblin do Mercado..."
+                placeholder="Ex: Aldric da Fatura, Selene dos Saldos..."
                 className="w-full px-4 py-3 rounded-lg border border-border bg-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <div className="text-xs text-muted-foreground">
                 <p className="font-medium mb-2">Sugestões do Reino:</p>
                 <div className="flex flex-wrap gap-2">
-                  {['Dragão da Fatura', 'Slime do Delivery', 'Goblin do Mercado', 'Lobo do Uber', 'Fantasma da Shopee', 'Golem da Casa', 'Sombra dos Impulsos'].map(s => (
+                  {[
+                    'Aldric da Fatura',
+                    'Selene dos Saldos',
+                    'Borin do Orçamento',
+                    'Mira das Moedas',
+                    'Cedric do Cashback',
+                    'Lia da Reserva',
+                    'Tomas do Tesouro',
+                    'Iria dos Juros',
+                  ].map(s => (
                     <button key={s} onClick={() => setForm({ ...form, name: s })}
                       className="px-2 py-1 bg-muted hover:bg-primary/10 rounded text-xs text-foreground border border-border transition">
                       {s}
@@ -140,7 +149,7 @@ export default function OnboardingPage({ onCharacterCreated, userName }: Onboard
             <div className="space-y-4">
               <h2 className="text-2xl font-bold text-foreground">Escolha a Classe</h2>
               <p className="text-muted-foreground text-sm">
-                A classe define os atributos iniciais e a habilidade especial. Expanda para ver os detalhes completos.
+                A classe define os atributos iniciais, bônus e estilo de progressão. Expanda para ver os detalhes completos.
               </p>
               <div className="space-y-3">
                 {CLASSES.map((cls) => {
@@ -198,13 +207,6 @@ export default function OnboardingPage({ onCharacterCreated, userName }: Onboard
                                 </li>
                               ))}
                             </ul>
-                          </div>
-
-                          <div className="bg-black/35 border border-border rounded-lg p-3">
-                            <p className="font-semibold text-foreground mb-1">
-                              Habilidade Especial: <span className="text-primary">{cls.specialName}</span>
-                            </p>
-                            <p className="text-muted-foreground">{cls.specialDescription}</p>
                           </div>
 
                           <div>

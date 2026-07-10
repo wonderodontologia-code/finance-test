@@ -127,7 +127,7 @@ function eventLogLabel(type: string): string {
     missed_day: 'Esquecimento',
     damage: 'Dano',
     death: 'Morte',
-    last_breath: 'Último Fôlego',
+    last_breath: 'Evento legado',
     regen: 'Recuperação',
     boss_ready: 'Boss Final',
     system: 'Sistema',
@@ -703,20 +703,6 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   <span>Boss Final</span>
                   <span>{new Date(character.cycleEnd).toLocaleDateString('pt-BR')}</span>
                 </div>
-              </div>
-            </section>
-
-            {/* Habilidade especial */}
-            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-2">
-              <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Habilidade Especial</h3>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-primary text-sm">{classDef.specialName}</p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{classDef.specialDescription}</p>
-                </div>
-                <span className={`shrink-0 text-xs px-2 py-1 rounded font-medium ${character.specialUsed ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary border border-primary/30'}`}>
-                  {character.specialUsed ? 'Usada' : 'Disponível'}
-                </span>
               </div>
             </section>
 

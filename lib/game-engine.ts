@@ -147,17 +147,7 @@ function applyMissedDay(char: Character): { character: Character; event: GameEve
   let eventType: GameEvent['type'] = 'missed_day'
   let message = `Maldição do Esquecimento causou ${damage} de dano em ${char.name}.`
 
-  // Guerreiro: Último Fôlego
-  if (newLife <= 0 && char.class === 'guerreiro' && !char.lastBreathUsed) {
-    updated = {
-      ...updated,
-      life: 1,
-      lastBreathUsed: true,
-      lastBreathRecoveryDays: 0,
-    }
-    eventType = 'last_breath'
-    message = `${char.name} ativou Último Fôlego! Vida em 1 — registre 3 dias seguidos para se recuperar.`
-  } else if (newLife <= 0) {
+  if (newLife <= 0) {
     updated = handleDeath(updated)
     eventType = 'death'
     message = `${char.name} caiu pela Maldição do Esquecimento. Voltou ao nível 1; itens e equipamentos foram perdidos, mas o Baú foi preservado.`
@@ -212,33 +202,6 @@ export function processDailyChecks(characters: Character[]): { characters: Chara
           lifeAfter: result.character.life,
         })
         events.push(result.event)
-      } else if (current.lastBreathRecoveryDays !== undefined && current.lastBreathUsed && current.life === 1) {
-        // Recovery mission for Guerreiro
-        const newRecoveryDays = (current.lastBreathRecoveryDays ?? 0) + 1
-        if (newRecoveryDays >= 3) {
-          const attrs = calcEffectiveAttributes(current)
-          const regen = 1 + Math.floor(attrs.regeneracao / 3)
-          current = {
-            ...current,
-            life: Math.min(current.maxLife, current.life + Math.round(current.maxLife * 0.5)),
-            lastBreathRecoveryDays: 0,
-            lastBreathUsed: true,
-          }
-          current = appendEventLog(current, {
-            type: 'regen',
-            date: `${day}T12:00:00.000Z`,
-            message: `${current.name} completou a missão de recuperação! +${regen} vida.`,
-            lifeAfter: current.life,
-          })
-          events.push({
-            type: 'regen',
-            characterId: current.id,
-            characterName: current.name,
-            message: `${current.name} completou a missão de recuperação! +${regen} vida.`,
-          })
-        } else {
-          current = { ...current, lastBreathRecoveryDays: newRecoveryDays }
-        }
       }
     }
 
