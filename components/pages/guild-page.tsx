@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import {
   type Character,
   CLASSES,
+  classImageForLevel,
   calcOuroConsumido,
   calcJourneyQuota,
   calcDaysInCycle,
@@ -42,6 +43,7 @@ function CharacterCard({
   onRitual: () => void
 }) {
   const classDef = CLASSES.find(c => c.id === character.class)!
+  const classImage = classImageForLevel(classDef, character.level)
   const ouroConsumido = calcOuroConsumido(character)
   const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysLeft = calcDaysLeft(character.cycleEnd)
@@ -70,10 +72,19 @@ function CharacterCard({
     <div className={`dungeon-panel rounded-lg border overflow-hidden transition hover:-translate-y-0.5 hover:border-primary/50 ${isAtRisk || isLowLife ? 'gold-frame border-accent/60' : 'border-border'}`}>
       {/* Card header */}
       <button onClick={onSelect} className="w-full p-4 text-left hover:bg-primary/5 transition">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="relative shrink-0 w-20 h-24 rounded-md border border-primary/35 bg-black/45 overflow-hidden shadow-inner shadow-black/50">
+            <div className="absolute inset-x-2 bottom-1 h-5 rounded-full bg-primary/15 blur-sm" />
+            <img
+              src={classImage.src}
+              alt={`${classDef.name} ${classImage.label}`}
+              className="relative z-[1] h-full w-full object-contain p-1 [image-rendering:pixelated]"
+            />
+          </div>
+          <div className="flex-1 min-w-0 pt-0.5">
             <p className="font-bold text-foreground truncate">{character.name}</p>
             <p className="text-xs text-muted-foreground">{classDef.name} · {character.category}</p>
+            <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-primary/85">{classImage.label}</p>
           </div>
           <div className="shrink-0 text-right">
             <p className="text-xs font-bold text-foreground">Nv. {character.level}</p>

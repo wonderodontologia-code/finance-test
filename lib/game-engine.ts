@@ -1,11 +1,19 @@
 import {
   type Character,
+  type CheckinReward,
   type ConsumableItemId,
   type EquipmentSlot,
+  type ExplorationLocationId,
+  type ExplorationReward,
   type CycleHistory,
   CONSUMABLE_ITEMS,
   CLASSES,
   DEFAULT_EQUIPMENT_LEVELS,
+  EQUIPMENT_SLOTS,
+  EXPLORATION_LOCATIONS,
+  CASTLE_LOCATION_ID,
+  GOLD_REWARD_IMAGE_SRC,
+  XP_REWARD_IMAGE_SRC,
   calcOuroConsumido,
   calcDaysInCycle,
   calcDamage,
@@ -13,6 +21,8 @@ import {
   equipmentPrice,
   calcMaxLife,
   normalizeCharacter,
+  weaponImageForClass,
+  weaponNameForClass,
   xpForLevel,
 } from './types'
 
@@ -326,6 +336,27 @@ export function battlesToday(char: Character): number {
   return (char.battleLog ?? []).find(log => log.date === today)?.count ?? 0
 }
 
+export const CHECKIN_COOLDOWN_HOURS = 8
+export const CHECKIN_ACTION_NAME = 'Ronda do Tesouro'
+
+export function nextCheckinAt(char: Character): Date | null {
+  if (!char.lastCheckinAt) return null
+  const last = new Date(char.lastCheckinAt)
+  if (Number.isNaN(last.getTime())) return null
+  return new Date(last.getTime() + CHECKIN_COOLDOWN_HOURS * 60 * 60 * 1000)
+}
+
+export function canCheckin(char: Character, now = new Date()): boolean {
+  const next = nextCheckinAt(char)
+  return !next || now >= next
+}
+
+export function checkinTimeRemaining(char: Character, now = new Date()): number {
+  const next = nextCheckinAt(char)
+  if (!next) return 0
+  return Math.max(0, next.getTime() - now.getTime())
+}
+
 export function maxBattleDamageOnDefeat(char: Character): number {
   const current = normalizeCharacter(char)
   const classDef = CLASSES.find(c => c.id === current.class)!
@@ -355,6 +386,334 @@ function addInventoryItem(char: Character, itemId: ConsumableItemId, quantity = 
     inventory: existing
       ? inventory.map(item => item.itemId === itemId ? { ...item, quantity: item.quantity + quantity } : item)
       : [...inventory, { itemId, quantity }],
+  }
+}
+
+function dateOnly(date: Date): string {
+  return date.toISOString().split('T')[0]
+}
+
+function daysSince(startedAt: string, now = new Date()): number {
+  const start = new Date(startedAt)
+  if (Number.isNaN(start.getTime())) return 0
+  return Math.max(0, Math.floor((now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)))
+}
+
+function registeredDaysSince(char: Character, startedAt: string): number {
+  const startDate = dateOnly(new Date(startedAt))
+  const uniqueDates = new Set(
+    char.dailyRecords
+      .filter(record => record.registered && record.date >= startDate)
+      .map(record => record.date)
+  )
+  return uniqueDates.size
+}
+
+function missedRitualSince(char: Character, startedAt: string, now = new Date()): boolean {
+  const startDate = dateOnly(new Date(startedAt))
+  const yesterday = addDays(dateOnly(now), -1)
+  if (startDate > yesterday) return false
+
+  const registeredDates = new Set(
+    char.dailyRecords
+      .filter(record => record.registered && record.date >= startDate && record.date <= yesterday)
+      .map(record => record.date)
+  )
+
+  return daysBetween(startDate, yesterday).some(day => !registeredDates.has(day))
+}
+
+function explorationLocation(locationId: ExplorationLocationId) {
+  return EXPLORATION_LOCATIONS.find(location => location.id === locationId) ?? EXPLORATION_LOCATIONS[0]
+}
+
+export function explorationProgress(char: Character, now = new Date()): {
+  progressDays: number
+  requiredDays: number
+  progressPct: number
+  readyToComplete: boolean
+} {
+  const current = normalizeCharacter(char)
+  const journey = current.exploration.activeJourney
+  if (!journey) {
+    return { progressDays: 0, requiredDays: 0, progressPct: 0, readyToComplete: false }
+  }
+
+  const progressDays = journey.returning
+    ? daysSince(journey.startedAt, now)
+    : registeredDaysSince(current, journey.startedAt)
+  const capped = Math.min(journey.requiredDays, progressDays)
+
+  return {
+    progressDays: capped,
+    requiredDays: journey.requiredDays,
+    progressPct: journey.requiredDays > 0 ? capped / journey.requiredDays : 1,
+    readyToComplete: capped >= journey.requiredDays,
+  }
+}
+
+export function canExploreLocation(char: Character, locationId: ExplorationLocationId): { ok: boolean; reason?: string } {
+  const current = normalizeCharacter(char)
+  const location = explorationLocation(locationId)
+  if (location.id === CASTLE_LOCATION_ID) return { ok: false, reason: 'O castelo é o ponto de partida.' }
+  if (current.exploration.activeJourney) return { ok: false, reason: 'Já existe uma exploração em andamento.' }
+  if (current.exploration.currentLocationId !== CASTLE_LOCATION_ID) return { ok: false, reason: 'Volte ao castelo antes de explorar outro local.' }
+  if (current.exploration.completedLocationIds.includes(location.id)) return { ok: false, reason: 'Esse local já foi explorado.' }
+  if (current.level < location.minLevel) return { ok: false, reason: `Requer nível ${location.minLevel}.` }
+  return { ok: true }
+}
+
+export function syncExplorationConsistency(char: Character, now = new Date()): { character: Character; changed: boolean; message?: string } {
+  const current = normalizeCharacter(char)
+  const journey = current.exploration.activeJourney
+  if (!journey || journey.returning) return { character: current, changed: false }
+  if (!missedRitualSince(current, journey.startedAt, now)) return { character: current, changed: false }
+
+  const destination = explorationLocation(journey.toLocationId)
+  return {
+    character: {
+      ...current,
+      exploration: {
+        ...current.exploration,
+        activeJourney: {
+          fromLocationId: destination.id,
+          toLocationId: CASTLE_LOCATION_ID,
+          startedAt: now.toISOString(),
+          requiredDays: 1,
+          returning: true,
+        },
+      },
+    },
+    changed: true,
+    message: `A sequência do Ritual de Registro foi quebrada. A exploração em ${destination.name} foi abandonada e o personagem está voltando ao castelo.`,
+  }
+}
+
+export function startExploration(char: Character, locationId: ExplorationLocationId): { character: Character; ok: boolean; message: string } {
+  const current = normalizeCharacter(char)
+  const location = explorationLocation(locationId)
+  const allowed = canExploreLocation(current, location.id)
+  if (!allowed.ok) return { character: current, ok: false, message: allowed.reason ?? 'Não foi possível iniciar a exploração.' }
+
+  return {
+    character: {
+      ...current,
+      exploration: {
+        ...current.exploration,
+        activeJourney: {
+          fromLocationId: CASTLE_LOCATION_ID,
+          toLocationId: location.id,
+          startedAt: new Date().toISOString(),
+          requiredDays: location.requiredDays,
+          returning: false,
+        },
+      },
+    },
+    ok: true,
+    message: `Exploração iniciada: ${location.name}. Complete ${location.requiredDays} dia${location.requiredDays > 1 ? 's' : ''} de Ritual de Registro para chegar ao destino.`,
+  }
+}
+
+function equipmentRewardImage(char: Character, slot: EquipmentSlot): string {
+  return slot === 'weapon' ? weaponImageForClass(char.class) : EQUIPMENT_SLOTS[slot].imageSrc
+}
+
+function equipmentRewardName(char: Character, slot: EquipmentSlot): string {
+  return slot === 'weapon' ? weaponNameForClass(char.class) : EQUIPMENT_SLOTS[slot].baseName
+}
+
+function buildExplorationReward(char: Character, locationId: ExplorationLocationId): { character: Character; reward: ExplorationReward } {
+  let current = normalizeCharacter(char)
+  const location = explorationLocation(locationId)
+  const attrs = calcEffectiveAttributes(current)
+  const xpGained = Math.round(location.xpBase + current.level * 5 + attrs.sabedoria * 1.5)
+  const dropRoll = Math.random()
+  current = applyLevelUp(current, xpGained)
+
+  if (dropRoll < location.dropChance && location.lootKind === 'equipment') {
+    const equipment = { ...DEFAULT_EQUIPMENT_LEVELS, ...(current.equipmentLevels ?? {}) }
+    const availableSlots = (Object.keys(equipment) as EquipmentSlot[]).filter(slot => equipment[slot] < 10)
+    if (availableSlots.length > 0) {
+      const slot = availableSlots[Math.floor(Math.random() * availableSlots.length)]
+      const nextLevel = equipment[slot] + 1
+      const updated: Character = {
+        ...current,
+        equipmentLevels: { ...equipment, [slot]: nextLevel },
+      }
+      const classDef = CLASSES.find(c => c.id === updated.class)!
+      const maxLife = calcMaxLife(updated.level, calcEffectiveAttributes(updated), classDef)
+      current = { ...updated, maxLife, life: Math.min(maxLife, updated.life) }
+      return {
+        character: current,
+        reward: {
+          type: 'equipment',
+          label: `${equipmentRewardName(current, slot)} Nv. ${nextLevel}`,
+          imageSrc: equipmentRewardImage(current, slot),
+          xpGained,
+          equipmentSlotGained: slot,
+          equipmentLevelGained: nextLevel,
+        },
+      }
+    }
+  }
+
+  if (dropRoll < location.dropChance && location.lootKind === 'consumable') {
+    const itemGained: ConsumableItemId = location.requiredDays >= 3 && Math.random() > 0.72 ? 'pocao_grande' : 'pocao_pequena'
+    current = addInventoryItem(current, itemGained, 1)
+    return {
+      character: current,
+      reward: {
+        type: 'consumable',
+        label: CONSUMABLE_ITEMS[itemGained].name,
+        imageSrc: CONSUMABLE_ITEMS[itemGained].imageSrc,
+        xpGained,
+        itemGained,
+      },
+    }
+  }
+
+  const goldGained = Math.round(location.goldBase + current.level * 4 + attrs.prosperidade * 2)
+  current = {
+    ...current,
+    goldChest: (current.goldChest ?? 0) + goldGained,
+  }
+  return {
+    character: current,
+    reward: {
+      type: 'gold',
+      label: `+R$ ${goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+      imageSrc: GOLD_REWARD_IMAGE_SRC,
+      xpGained,
+      goldGained,
+    },
+  }
+}
+
+export function completeExplorationStep(char: Character): { character: Character; ok: boolean; message: string; reward?: ExplorationReward } {
+  const current = normalizeCharacter(char)
+  const journey = current.exploration.activeJourney
+  if (!journey) return { character: current, ok: false, message: 'Nenhuma exploração em andamento.' }
+
+  const progress = explorationProgress(current)
+  if (!progress.readyToComplete) {
+    return {
+      character: current,
+      ok: false,
+      message: journey.returning
+        ? 'A caravana ainda não chegou ao castelo.'
+        : 'Ainda faltam dias de Ritual de Registro para chegar ao destino.',
+    }
+  }
+
+  if (journey.returning) {
+    return {
+      character: {
+        ...current,
+        exploration: {
+          ...current.exploration,
+          currentLocationId: CASTLE_LOCATION_ID,
+          activeJourney: undefined,
+        },
+      },
+      ok: true,
+      message: 'Retorno concluído. O personagem está de volta ao Castelo da Guilda.',
+    }
+  }
+
+  const { character: rewarded, reward } = buildExplorationReward(current, journey.toLocationId)
+  const location = explorationLocation(journey.toLocationId)
+  return {
+    character: {
+      ...rewarded,
+      exploration: {
+        ...rewarded.exploration,
+        currentLocationId: location.id,
+        completedLocationIds: [...new Set([...rewarded.exploration.completedLocationIds, location.id])],
+        lastReward: reward,
+        activeJourney: {
+          fromLocationId: location.id,
+          toLocationId: CASTLE_LOCATION_ID,
+          startedAt: new Date().toISOString(),
+          requiredDays: 1,
+          returning: true,
+        },
+      },
+    },
+    ok: true,
+    message: `${location.name} explorado. A volta ao castelo começou e leva 1 dia.`,
+    reward,
+  }
+}
+
+export interface CheckinResult {
+  character: Character
+  ok: boolean
+  message: string
+  reward?: CheckinReward
+  nextAvailableAt?: string
+}
+
+export function performCheckin(char: Character): CheckinResult {
+  let current = normalizeCharacter(char)
+  const now = new Date()
+  const next = nextCheckinAt(current)
+
+  if (next && now < next) {
+    return {
+      character: current,
+      ok: false,
+      message: `${CHECKIN_ACTION_NAME} ainda está em preparo.`,
+      nextAvailableAt: next.toISOString(),
+    }
+  }
+
+  const attrs = calcEffectiveAttributes(current)
+  const roll = Math.random()
+  let reward: CheckinReward
+
+  if (roll < 0.45) {
+    const xpGained = Math.round(10 + current.level * 3 + attrs.sabedoria * 1.4)
+    current = applyLevelUp(current, xpGained)
+    reward = {
+      type: 'xp',
+      label: `+${xpGained} XP`,
+      imageSrc: XP_REWARD_IMAGE_SRC,
+      xpGained,
+    }
+  } else if (roll < 0.75) {
+    const goldGained = Math.round(8 + current.level * 3 + attrs.prosperidade * 2)
+    current = {
+      ...current,
+      goldChest: (current.goldChest ?? 0) + goldGained,
+    }
+    reward = {
+      type: 'gold',
+      label: `+R$ ${goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+      imageSrc: GOLD_REWARD_IMAGE_SRC,
+      goldGained,
+    }
+  } else {
+    const itemGained: ConsumableItemId = Math.random() > 0.82 ? 'pocao_grande' : 'pocao_pequena'
+    current = addInventoryItem(current, itemGained, 1)
+    reward = {
+      type: 'item',
+      label: CONSUMABLE_ITEMS[itemGained].name,
+      imageSrc: CONSUMABLE_ITEMS[itemGained].imageSrc,
+      itemGained,
+    }
+  }
+
+  current = {
+    ...current,
+    lastCheckinAt: now.toISOString(),
+  }
+
+  return {
+    character: current,
+    ok: true,
+    message: `${CHECKIN_ACTION_NAME} concluída. Você manteve os olhos no reino e encontrou uma recompensa.`,
+    reward,
+    nextAvailableAt: new Date(now.getTime() + CHECKIN_COOLDOWN_HOURS * 60 * 60 * 1000).toISOString(),
   }
 }
 

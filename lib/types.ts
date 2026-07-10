@@ -23,6 +23,22 @@ export interface Attributes {
 
 export type EquipmentSlot = 'head' | 'armor' | 'gloves' | 'weapon'
 export type ConsumableItemId = 'pocao_pequena' | 'pocao_grande'
+export type CheckinRewardType = 'xp' | 'gold' | 'item'
+export type ExplorationRewardType = 'xp' | 'gold' | 'consumable' | 'equipment'
+export type ExplorationLocationId =
+  | 'castelo'
+  | 'mercado_das_moedas'
+  | 'bosque_das_faturas'
+  | 'minas_do_lastro'
+  | 'torre_do_orcamento'
+  | 'pantanodo_impulso'
+  | 'fortaleza_do_tesouro'
+  | 'cripta_dos_juros'
+  | 'abismo_do_cheque_especial'
+  | 'covil_da_assinatura'
+  | 'catacumbas_do_parcelamento'
+  | 'necropole_do_boleto'
+  | 'labirinto_do_cashback'
 
 export interface InventoryItem {
   itemId: ConsumableItemId
@@ -34,6 +50,41 @@ export type EquipmentLevels = Record<EquipmentSlot, number>
 export interface BattleLog {
   date: string
   count: number
+}
+
+export interface CheckinReward {
+  type: CheckinRewardType
+  label: string
+  imageSrc: string
+  xpGained?: number
+  goldGained?: number
+  itemGained?: ConsumableItemId
+}
+
+export interface ExplorationReward {
+  type: ExplorationRewardType
+  label: string
+  imageSrc: string
+  xpGained: number
+  goldGained?: number
+  itemGained?: ConsumableItemId
+  equipmentSlotGained?: EquipmentSlot
+  equipmentLevelGained?: number
+}
+
+export interface ExplorationJourney {
+  fromLocationId: ExplorationLocationId
+  toLocationId: ExplorationLocationId
+  startedAt: string
+  requiredDays: number
+  returning: boolean
+}
+
+export interface ExplorationState {
+  currentLocationId: ExplorationLocationId
+  completedLocationIds: ExplorationLocationId[]
+  activeJourney?: ExplorationJourney
+  lastReward?: ExplorationReward
 }
 
 export interface DailyRecord {
@@ -89,6 +140,8 @@ export interface Character {
   inventory: InventoryItem[]
   equipmentLevels: EquipmentLevels
   battleLog: BattleLog[]
+  lastCheckinAt?: string
+  exploration: ExplorationState
   // Persistência / ciclo
   lastProcessedDate?: string
   goldChest?: number // Baú do Ouro Preservado acumulado
@@ -359,6 +412,196 @@ export const CONSUMABLE_ITEMS: Record<ConsumableItemId, {
 }
 
 export const GOLD_REWARD_IMAGE_SRC = '/items/ouro-do-bau.png'
+export const XP_REWARD_IMAGE_SRC = '/items/xp-pergaminho.png'
+export const KINGDOM_MAP_IMAGE_SRC = '/exploration/reino-map.png'
+
+export interface ExplorationLocation {
+  id: ExplorationLocationId
+  name: string
+  description: string
+  x: number
+  y: number
+  minLevel: number
+  requiredDays: number
+  xpBase: number
+  goldBase: number
+  dropChance: number
+  lootKind: 'basic' | 'consumable' | 'equipment'
+}
+
+export const CASTLE_LOCATION_ID: ExplorationLocationId = 'castelo'
+
+export const EXPLORATION_LOCATIONS: ExplorationLocation[] = [
+  {
+    id: 'castelo',
+    name: 'Castelo da Guilda',
+    description: 'Ponto de partida e retorno de todas as expedições do reino.',
+    x: 49,
+    y: 66,
+    minLevel: 1,
+    requiredDays: 0,
+    xpBase: 0,
+    goldBase: 0,
+    dropChance: 0,
+    lootKind: 'basic',
+  },
+  {
+    id: 'mercado_das_moedas',
+    name: 'Mercado das Moedas',
+    description: 'Barracas antigas onde comerciantes trocam disciplina por pequenas recompensas.',
+    x: 17,
+    y: 71,
+    minLevel: 1,
+    requiredDays: 2,
+    xpBase: 22,
+    goldBase: 18,
+    dropChance: 0.35,
+    lootKind: 'consumable',
+  },
+  {
+    id: 'bosque_das_faturas',
+    name: 'Bosque das Faturas',
+    description: 'Trilhas silenciosas onde gastos esquecidos deixam pistas e poções para quem observa bem.',
+    x: 31,
+    y: 47,
+    minLevel: 1,
+    requiredDays: 3,
+    xpBase: 32,
+    goldBase: 24,
+    dropChance: 0.4,
+    lootKind: 'consumable',
+  },
+  {
+    id: 'minas_do_lastro',
+    name: 'Minas do Lastro',
+    description: 'Galerias profundas onde o minério do autocontrole pode virar equipamento.',
+    x: 10,
+    y: 40,
+    minLevel: 3,
+    requiredDays: 5,
+    xpBase: 48,
+    goldBase: 34,
+    dropChance: 0.42,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'torre_do_orcamento',
+    name: 'Torre do Orçamento',
+    description: 'Uma torre de cálculos e runas, boa para ganhar experiência e itens melhores.',
+    x: 84,
+    y: 22,
+    minLevel: 5,
+    requiredDays: 7,
+    xpBase: 66,
+    goldBase: 46,
+    dropChance: 0.48,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'pantanodo_impulso',
+    name: 'Pântano do Impulso',
+    description: 'Um lugar perigoso para a carteira. Quem atravessa sem quebrar a sequência volta mais forte.',
+    x: 79,
+    y: 55,
+    minLevel: 8,
+    requiredDays: 10,
+    xpBase: 90,
+    goldBase: 64,
+    dropChance: 0.55,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'fortaleza_do_tesouro',
+    name: 'Fortaleza do Tesouro',
+    description: 'Destino raro, caro em consistência e com a melhor chance de equipamento permanente.',
+    x: 18,
+    y: 20,
+    minLevel: 12,
+    requiredDays: 14,
+    xpBase: 130,
+    goldBase: 95,
+    dropChance: 0.62,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'cripta_dos_juros',
+    name: 'Cripta dos Juros Compostos',
+    description: 'Túneis antigos onde cada passo ecoa como uma dívida crescendo no escuro.',
+    x: 48,
+    y: 25,
+    minLevel: 4,
+    requiredDays: 6,
+    xpBase: 58,
+    goldBase: 40,
+    dropChance: 0.44,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'abismo_do_cheque_especial',
+    name: 'Abismo do Cheque Especial',
+    description: 'Uma fenda perigosa que devora descuido. Só atravessa quem sustenta a sequência.',
+    x: 66,
+    y: 44,
+    minLevel: 6,
+    requiredDays: 8,
+    xpBase: 76,
+    goldBase: 55,
+    dropChance: 0.5,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'covil_da_assinatura',
+    name: 'Covil das Assinaturas Esquecidas',
+    description: 'Um ninho de cobranças pequenas, recorrentes e traiçoeiras. Poções costumam aparecer por aqui.',
+    x: 59,
+    y: 57,
+    minLevel: 2,
+    requiredDays: 4,
+    xpBase: 38,
+    goldBase: 28,
+    dropChance: 0.42,
+    lootKind: 'consumable',
+  },
+  {
+    id: 'catacumbas_do_parcelamento',
+    name: 'Catacumbas do Parcelamento',
+    description: 'Corredores de promessas suaves e armadilhas longas. Bom lugar para encontrar proteção.',
+    x: 38,
+    y: 35,
+    minLevel: 7,
+    requiredDays: 9,
+    xpBase: 84,
+    goldBase: 58,
+    dropChance: 0.52,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'necropole_do_boleto',
+    name: 'Necrópole do Boleto Vencido',
+    description: 'Lápides de prazos perdidos cercam recompensas fortes para quem mantém o ritual.',
+    x: 81,
+    y: 67,
+    minLevel: 10,
+    requiredDays: 12,
+    xpBase: 112,
+    goldBase: 78,
+    dropChance: 0.58,
+    lootKind: 'equipment',
+  },
+  {
+    id: 'labirinto_do_cashback',
+    name: 'Labirinto do Cashback Ilusório',
+    description: 'Caminhos dourados prometem vantagem, mas só a disciplina revela o prêmio real.',
+    x: 29,
+    y: 82,
+    minLevel: 9,
+    requiredDays: 11,
+    xpBase: 100,
+    goldBase: 72,
+    dropChance: 0.54,
+    lootKind: 'equipment',
+  },
+]
 
 export const EQUIPMENT_SLOTS: Record<EquipmentSlot, {
   slot: EquipmentSlot
@@ -430,6 +673,13 @@ export function normalizeCharacter(character: Character): Character {
     inventory: character.inventory ?? [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS, ...(character.equipmentLevels ?? {}) },
     battleLog: character.battleLog ?? [],
+    lastCheckinAt: character.lastCheckinAt,
+    exploration: {
+      currentLocationId: character.exploration?.currentLocationId ?? CASTLE_LOCATION_ID,
+      completedLocationIds: character.exploration?.completedLocationIds ?? [],
+      activeJourney: character.exploration?.activeJourney,
+      lastReward: character.exploration?.lastReward,
+    },
     goldChest: character.goldChest ?? 0,
   }
 }
@@ -543,6 +793,11 @@ export function createCharacter(params: {
     inventory: [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
     battleLog: [],
+    lastCheckinAt: undefined,
+    exploration: {
+      currentLocationId: CASTLE_LOCATION_ID,
+      completedLocationIds: [],
+    },
     goldChest: 0,
     cycleHistory: [],
   }

@@ -1,15 +1,23 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Check, Home, Lock, MapPin, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
+  type CheckinReward,
   type ConsumableItemId,
   type EquipmentSlot,
+  type ExplorationLocationId,
+  type ExplorationReward,
   CLASSES,
   CONSUMABLE_ITEMS,
   EQUIPMENT_SLOTS,
+  EXPLORATION_LOCATIONS,
+  CASTLE_LOCATION_ID,
   GOLD_REWARD_IMAGE_SRC,
+  XP_REWARD_IMAGE_SRC,
+  KINGDOM_MAP_IMAGE_SRC,
   ATTRIBUTE_DEFINITIONS,
   type Attributes,
   calcOuroConsumido,
@@ -30,11 +38,22 @@ import {
 } from '@/lib/types'
 import {
   type BattleResult,
+  type CheckinResult,
+  CHECKIN_ACTION_NAME,
+  CHECKIN_COOLDOWN_HOURS,
   battlesToday,
   buyConsumable,
   buyEquipmentUpgrade,
+  canCheckin,
+  canExploreLocation,
+  checkinTimeRemaining,
+  completeExplorationStep,
+  explorationProgress,
   maxBattleDamageOnDefeat,
   performBattle,
+  performCheckin,
+  startExploration,
+  syncExplorationConsistency,
   updateJourneyMarker,
   useConsumable,
 } from '@/lib/game-engine'
@@ -78,16 +97,57 @@ function ProgressBar({ value, max, colorClass }: { value: number; max: number; c
   )
 }
 
+function formatDuration(ms: number): string {
+  if (ms <= 0) return 'disponível agora'
+  const totalMinutes = Math.ceil(ms / (1000 * 60))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours <= 0) return `${minutes} min`
+  if (minutes === 0) return `${hours}h`
+  return `${hours}h ${minutes}min`
+}
+
+function rewardTitle(reward: CheckinReward): string {
+  if (reward.type === 'xp') return 'Conhecimento encontrado'
+  if (reward.type === 'gold') return 'Ouro para o Baú'
+  return 'Item encontrado'
+}
+
+function explorationRewardTitle(reward: ExplorationReward): string {
+  if (reward.type === 'equipment') return 'Equipamento encontrado'
+  if (reward.type === 'consumable') return 'Item encontrado'
+  if (reward.type === 'gold') return 'Ouro recuperado'
+  return 'Conhecimento encontrado'
+}
+
+function locationById(locationId: ExplorationLocationId) {
+  return EXPLORATION_LOCATIONS.find(location => location.id === locationId) ?? EXPLORATION_LOCATIONS[0]
+}
+
+function routePoint(fromId: ExplorationLocationId, toId: ExplorationLocationId, progressPct: number) {
+  const from = locationById(fromId)
+  const to = locationById(toId)
+  const pct = Math.max(0, Math.min(1, progressPct))
+  return {
+    x: from.x + (to.x - from.x) * pct,
+    y: from.y + (to.y - from.y) * pct,
+  }
+}
+
 export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onOpenRitual }: CharacterDetailPageProps) {
-  const [activeTab, setActiveTab] = useState<'stats' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'>('stats')
+  const [activeTab, setActiveTab] = useState<'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'>('stats')
   const [tooltipAttr, setTooltipAttr] = useState<string | null>(null)
   const [editingMarker, setEditingMarker] = useState(false)
   const [markerValue, setMarkerValue] = useState(String(character.journeyMarker))
   const [showNextEvolution, setShowNextEvolution] = useState(false)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [lastBattle, setLastBattle] = useState<BattleResult | null>(null)
+  const [lastCheckin, setLastCheckin] = useState<CheckinResult | null>(null)
+  const [selectedLocationId, setSelectedLocationId] = useState<ExplorationLocationId | null>(null)
+  const [showPositionDetails, setShowPositionDetails] = useState(false)
   const [battleScreenOpen, setBattleScreenOpen] = useState(false)
   const [visibleBattleRounds, setVisibleBattleRounds] = useState(0)
+  const [nowTick, setNowTick] = useState(() => Date.now())
 
   const classDef = CLASSES.find(c => c.id === character.class)!
   const currentClassImage = classImageForLevel(classDef, character.level)
@@ -96,6 +156,18 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const equipmentAttributes = calcEquipmentAttributes(character)
   const battleCount = battlesToday(character)
   const maxBattleLoss = maxBattleDamageOnDefeat(character)
+  const checkinReady = canCheckin(character, new Date(nowTick))
+  const checkinRemaining = checkinTimeRemaining(character, new Date(nowTick))
+  const currentExploration = character.exploration ?? {
+    currentLocationId: CASTLE_LOCATION_ID,
+    completedLocationIds: [],
+  }
+  const exploration = explorationProgress(character, new Date(nowTick))
+  const selectedLocation = selectedLocationId ? locationById(selectedLocationId) : null
+  const activeJourney = currentExploration.activeJourney
+  const markerPosition = activeJourney
+    ? routePoint(activeJourney.fromLocationId, activeJourney.toLocationId, exploration.progressPct)
+    : locationById(currentExploration.currentLocationId)
   const ouroConsumido = calcOuroConsumido(character)
   const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysLeft = calcDaysLeft(character.cycleEnd)
@@ -130,6 +202,8 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
   const tabs = [
     { key: 'stats', label: 'Ficha' },
+    { key: 'checkin', label: 'Ronda' },
+    { key: 'explore', label: 'Explorar' },
     { key: 'battle', label: 'Batalha' },
     { key: 'inventory', label: 'Inventário' },
     { key: 'shop', label: 'Loja' },
@@ -147,6 +221,48 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
     return () => window.clearTimeout(timer)
   }, [battleScreenOpen, lastBattle, visibleBattleRounds])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const result = syncExplorationConsistency(character, new Date(nowTick))
+    if (!result.changed) return
+    onUpdateCharacter(result.character)
+    setActionMessage(result.message ?? 'A exploração foi atualizada.')
+  }, [character, nowTick, onUpdateCharacter])
+
+  const handleCheckin = () => {
+    const result = performCheckin(character)
+    onUpdateCharacter(result.character)
+    setLastCheckin(result)
+    setLastBattle(null)
+    setBattleScreenOpen(false)
+    setActionMessage(result.reward ? `${result.message} ${rewardTitle(result.reward)}: ${result.reward.label}.` : result.message)
+    setNowTick(Date.now())
+  }
+
+  const handleStartExploration = (locationId: ExplorationLocationId) => {
+    const result = startExploration(character, locationId)
+    onUpdateCharacter(result.character)
+    setActionMessage(result.message)
+    setLastBattle(null)
+    setLastCheckin(null)
+    setBattleScreenOpen(false)
+    setNowTick(Date.now())
+  }
+
+  const handleCompleteExploration = () => {
+    const result = completeExplorationStep(character)
+    onUpdateCharacter(result.character)
+    setActionMessage(result.reward ? `${result.message} ${explorationRewardTitle(result.reward)}: ${result.reward.label}. +${result.reward.xpGained} XP.` : result.message)
+    setLastBattle(null)
+    setLastCheckin(null)
+    setBattleScreenOpen(false)
+    setNowTick(Date.now())
+  }
 
   const handleBattle = () => {
     const result = performBattle(character)
@@ -554,6 +670,24 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
               </div>
             </section>
 
+            {/* Ronda do Tesouro */}
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">{CHECKIN_ACTION_NAME}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Volte ao app a cada {CHECKIN_COOLDOWN_HOURS}h para vigiar o reino e receber uma recompensa rápida.
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded border px-2 py-1 text-xs font-bold ${checkinReady ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-black/35 text-muted-foreground'}`}>
+                  {checkinReady ? 'Pronta' : formatDuration(checkinRemaining)}
+                </span>
+              </div>
+              <Button onClick={() => setActiveTab('checkin')} variant="outline" className="w-full">
+                Abrir Ronda
+              </Button>
+            </section>
+
             {/* Registros recentes */}
             {character.dailyRecords.length > 0 && (
               <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
@@ -585,6 +719,365 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 </Button>
               )
             })()}
+          </div>
+        )}
+
+        {/* Tab: Ronda */}
+        {activeTab === 'checkin' && (
+          <div className="space-y-4">
+            <section className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-4 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-primary">Visita recorrente</p>
+                  <h3 className="font-semibold text-foreground">{CHECKIN_ACTION_NAME}</h3>
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    Uma patrulha rápida pelo salão do tesouro. Pode ser feita a cada {CHECKIN_COOLDOWN_HOURS}h desde a última ronda para incentivar você a abrir o app, olhar a vida, conferir o Baú e manter o controle em vista.
+                  </p>
+                </div>
+                <div className="shrink-0 rounded border border-primary/35 bg-black/45 p-2">
+                  <img
+                    src={XP_REWARD_IMAGE_SRC}
+                    alt=""
+                    className="size-16 rounded object-cover"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded border border-border bg-black/35 p-2">
+                  <img src={XP_REWARD_IMAGE_SRC} alt="" className="mx-auto mb-1 size-10 rounded object-cover" style={{ imageRendering: 'pixelated' }} />
+                  <p className="text-muted-foreground">XP</p>
+                </div>
+                <div className="rounded border border-border bg-black/35 p-2">
+                  <img src={GOLD_REWARD_IMAGE_SRC} alt="" className="mx-auto mb-1 size-10 rounded object-cover" style={{ imageRendering: 'pixelated' }} />
+                  <p className="text-muted-foreground">Ouro</p>
+                </div>
+                <div className="rounded border border-border bg-black/35 p-2">
+                  <img src={CONSUMABLE_ITEMS.pocao_pequena.imageSrc} alt="" className="mx-auto mb-1 size-10 rounded object-cover" style={{ imageRendering: 'pixelated' }} />
+                  <p className="text-muted-foreground">Poção</p>
+                </div>
+              </div>
+
+              <div className="rounded border border-primary/30 bg-primary/10 p-3 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Status da ronda</span>
+                  <span className={`font-bold ${checkinReady ? 'text-primary' : 'text-secondary'}`}>
+                    {checkinReady ? 'Disponível agora' : `Volte em ${formatDuration(checkinRemaining)}`}
+                  </span>
+                </div>
+                {character.lastCheckinAt && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Última ronda: {new Date(character.lastCheckinAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </p>
+                )}
+              </div>
+
+              <Button
+                onClick={handleCheckin}
+                disabled={!checkinReady}
+                className="w-full py-3 text-base font-semibold disabled:opacity-40"
+              >
+                {checkinReady ? `Fazer ${CHECKIN_ACTION_NAME}` : 'Ronda em preparo'}
+              </Button>
+            </section>
+
+            {lastCheckin?.reward && (
+              <section className="dungeon-panel bg-card border border-primary/30 rounded-lg p-4 space-y-3 animate-in fade-in slide-in-from-bottom-1">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={lastCheckin.reward.imageSrc}
+                    alt=""
+                    className="size-20 rounded border border-primary/35 object-cover"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-primary">Recompensa da ronda</p>
+                    <h4 className="font-bold text-foreground">{rewardTitle(lastCheckin.reward)}</h4>
+                    <p className="text-sm text-secondary font-semibold">{lastCheckin.reward.label}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">{lastCheckin.message}</p>
+              </section>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Explorar */}
+        {activeTab === 'explore' && (
+          <div className="space-y-4">
+            <section className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-4 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-primary">Mapa do Reino</p>
+                  <h3 className="font-semibold text-foreground">Explorar</h3>
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    Escolha um destino e avance com dias seguidos de Ritual de Registro. Quanto melhor o saque, mais dias de consistência a expedição exige. Cada local só pode ser explorado uma vez.
+                  </p>
+                </div>
+                <span className="shrink-0 rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
+                  {currentExploration.completedLocationIds.length}/{EXPLORATION_LOCATIONS.length - 1}
+                </span>
+              </div>
+
+              <div
+                className="relative overflow-hidden rounded-lg border border-primary/35 bg-black"
+                onClick={() => {
+                  setSelectedLocationId(null)
+                  setShowPositionDetails(false)
+                }}
+              >
+                <img
+                  src={KINGDOM_MAP_IMAGE_SRC}
+                  alt="Mapa do Reino"
+                  className="block w-full"
+                />
+                {activeJourney && (
+                  <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <line
+                      x1={locationById(activeJourney.fromLocationId).x}
+                      y1={locationById(activeJourney.fromLocationId).y}
+                      x2={locationById(activeJourney.toLocationId).x}
+                      y2={locationById(activeJourney.toLocationId).y}
+                      stroke="rgba(214,169,51,0.9)"
+                      strokeWidth="0.6"
+                      strokeDasharray="2 1.2"
+                    />
+                  </svg>
+                )}
+
+                {EXPLORATION_LOCATIONS.map(location => {
+                  const completed = currentExploration.completedLocationIds.includes(location.id)
+                  const selected = selectedLocationId === location.id
+                  const locked = location.id !== CASTLE_LOCATION_ID && character.level < location.minLevel
+                  const inRoute = activeJourney?.toLocationId === location.id || activeJourney?.fromLocationId === location.id
+                  return (
+                    <button
+                      key={location.id}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setShowPositionDetails(false)
+                        setSelectedLocationId(location.id)
+                      }}
+                      className={`absolute z-[2] grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border shadow-lg transition sm:size-8 ${
+                        selected
+                          ? 'border-primary bg-primary text-primary-foreground ring-2 ring-primary/40'
+                          : completed
+                            ? 'border-primary/60 bg-black/75 text-primary'
+                            : locked
+                              ? 'border-border bg-black/75 text-muted-foreground'
+                              : inRoute
+                                ? 'border-secondary bg-secondary text-black'
+                                : 'border-primary/50 bg-black/75 text-primary hover:bg-primary hover:text-primary-foreground'
+                      }`}
+                      style={{ left: `${location.x}%`, top: `${location.y}%` }}
+                      aria-label={location.name}
+                    >
+                      {location.id === CASTLE_LOCATION_ID ? (
+                        <Home className="size-3.5" aria-hidden="true" />
+                      ) : completed ? (
+                        <Check className="size-3.5" aria-hidden="true" />
+                      ) : locked ? (
+                        <Lock className="size-3.5" aria-hidden="true" />
+                      ) : (
+                        <Search className="size-3.5" aria-hidden="true" />
+                      )}
+                    </button>
+                  )
+                })}
+
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setSelectedLocationId(null)
+                    setShowPositionDetails(true)
+                  }}
+                  className="absolute z-[3] flex -translate-x-1/2 -translate-y-full flex-col items-center gap-0.5 text-primary drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]"
+                  style={{ left: `${markerPosition.x}%`, top: `${markerPosition.y}%` }}
+                  aria-label="Você está aqui"
+                >
+                  <span className="rounded border border-primary/45 bg-black/85 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                    Você está aqui
+                  </span>
+                  <MapPin className="size-8 fill-primary text-black sm:size-9" aria-hidden="true" />
+                </button>
+              </div>
+
+              {activeJourney && (
+                <div className="rounded border border-primary/30 bg-primary/10 p-3 text-sm space-y-2">
+                  <div className="flex justify-between gap-3">
+                    <span className="font-semibold text-foreground">
+                      {activeJourney.returning ? 'Retornando ao castelo' : `Rumo a ${locationById(activeJourney.toLocationId).name}`}
+                    </span>
+                    <span className="font-bold text-primary">{exploration.progressDays}/{exploration.requiredDays} dia{exploration.requiredDays > 1 ? 's' : ''}</span>
+                  </div>
+                  <ProgressBar value={exploration.progressDays} max={exploration.requiredDays} colorClass="bg-primary" />
+                  <p className="text-xs text-muted-foreground">
+                    {activeJourney.returning
+                      ? 'A volta leva 1 dia real e não exige Ritual de Registro.'
+                      : 'A ida avança apenas com dias em que você fez o Ritual de Registro.'}
+                  </p>
+                  <Button
+                    onClick={handleCompleteExploration}
+                    disabled={!exploration.readyToComplete}
+                    className="w-full disabled:opacity-40"
+                  >
+                    {exploration.readyToComplete
+                      ? activeJourney.returning ? 'Concluir Retorno' : 'Concluir Exploração'
+                      : activeJourney.returning ? 'Caravana em retorno' : 'Ainda viajando'}
+                  </Button>
+                </div>
+              )}
+            </section>
+
+            {(selectedLocation || showPositionDetails) && (
+              <div
+                className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+                role="dialog"
+                aria-modal="true"
+                onClick={() => {
+                  setSelectedLocationId(null)
+                  setShowPositionDetails(false)
+                }}
+              >
+                <div
+                  className="dungeon-panel gold-frame max-h-[88vh] w-full max-w-md overflow-auto rounded-lg border border-primary/45 bg-card p-4 shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+                        {showPositionDetails ? 'Posição atual' : 'Ponto de interesse'}
+                      </p>
+                      <h3 className="mt-1 font-bold text-foreground">
+                        {showPositionDetails ? 'Você está aqui' : selectedLocation?.name}
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLocationId(null)
+                        setShowPositionDetails(false)
+                      }}
+                      className="grid size-8 place-items-center rounded border border-border bg-black/35 text-muted-foreground hover:text-foreground"
+                      aria-label="Fechar detalhes"
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+
+                  {showPositionDetails ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center gap-4 rounded border border-primary/30 bg-primary/10 p-3">
+                        <div className="grid size-14 place-items-center rounded-full border border-primary/45 bg-black/55 text-primary">
+                          <MapPin className="size-8 fill-primary text-black" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground">{character.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {activeJourney
+                              ? activeJourney.returning
+                                ? 'Voltando para o Castelo da Guilda.'
+                                : `Em rota para ${locationById(activeJourney.toLocationId).name}.`
+                              : `No ${locationById(currentExploration.currentLocationId).name}.`}
+                          </p>
+                        </div>
+                      </div>
+                      {activeJourney ? (
+                        <div className="space-y-2 rounded border border-border bg-black/35 p-3 text-sm">
+                          <div className="flex justify-between gap-3">
+                            <span className="text-muted-foreground">Progresso</span>
+                            <span className="font-bold text-primary">{exploration.progressDays}/{exploration.requiredDays} dia{exploration.requiredDays > 1 ? 's' : ''}</span>
+                          </div>
+                          <ProgressBar value={exploration.progressDays} max={exploration.requiredDays} colorClass="bg-primary" />
+                        </div>
+                      ) : (
+                        <p className="rounded border border-border bg-black/35 p-3 text-sm text-muted-foreground">
+                          O personagem está parado e pronto para iniciar uma nova exploração a partir do castelo quando estiver disponível.
+                        </p>
+                      )}
+                    </div>
+                  ) : selectedLocation && (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-sm leading-relaxed text-muted-foreground">{selectedLocation.description}</p>
+                      <div className="flex items-center justify-between rounded border border-border bg-black/35 p-3 text-sm">
+                        <span className="text-muted-foreground">Requisito</span>
+                        <span className="font-bold text-foreground">Nível {selectedLocation.minLevel}+</span>
+                      </div>
+
+                      {selectedLocation.id === CASTLE_LOCATION_ID ? (
+                        <p className="rounded border border-border bg-black/35 p-3 text-sm text-muted-foreground">
+                          O castelo é o ponto de partida e retorno de todas as expedições.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                            <div className="rounded border border-border bg-black/35 p-2">
+                              <img src={XP_REWARD_IMAGE_SRC} alt="" className="mx-auto mb-1 size-10 rounded object-cover" style={{ imageRendering: 'pixelated' }} />
+                              <p className="text-muted-foreground">XP</p>
+                              <p className="font-bold text-secondary">+{Math.round(selectedLocation.xpBase + character.level * 5)}</p>
+                            </div>
+                            <div className="rounded border border-border bg-black/35 p-2">
+                              <p className="mb-1 text-muted-foreground">Dias</p>
+                              <p className="text-lg font-bold text-primary">{selectedLocation.requiredDays}</p>
+                            </div>
+                            <div className="rounded border border-border bg-black/35 p-2">
+                              <img
+                                src={selectedLocation.lootKind === 'equipment' ? EQUIPMENT_SLOTS.armor.imageSrc : CONSUMABLE_ITEMS.pocao_pequena.imageSrc}
+                                alt=""
+                                className="mx-auto mb-1 size-10 rounded object-cover"
+                                style={{ imageRendering: 'pixelated' }}
+                              />
+                              <p className="text-muted-foreground">Drop</p>
+                              <p className="font-bold text-primary">{Math.round(selectedLocation.dropChance * 100)}%</p>
+                            </div>
+                          </div>
+
+                          <p className="rounded border border-primary/30 bg-primary/10 p-3 text-xs text-muted-foreground">
+                            Pode render {selectedLocation.lootKind === 'equipment' ? '1 equipamento aleatório' : '1 poção'}; se o item não vier, ganha ouro no Baú. A ida exige Ritual de Registro em sequência.
+                          </p>
+
+                          {(() => {
+                            const allowed = canExploreLocation(character, selectedLocation.id)
+                            return (
+                              <Button
+                                onClick={() => handleStartExploration(selectedLocation.id)}
+                                disabled={!allowed.ok}
+                                className="w-full py-3 disabled:opacity-40"
+                              >
+                                {allowed.ok ? `Explorar ${selectedLocation.name}` : allowed.reason}
+                              </Button>
+                            )
+                          })()}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {currentExploration.lastReward && (
+              <section className="dungeon-panel bg-card border border-primary/30 rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={currentExploration.lastReward.imageSrc}
+                    alt=""
+                    className="size-20 rounded border border-primary/35 object-cover"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-primary">Última exploração</p>
+                    <h4 className="font-bold text-foreground">{explorationRewardTitle(currentExploration.lastReward)}</h4>
+                    <p className="text-sm text-secondary font-semibold">
+                      {currentExploration.lastReward.label} · +{currentExploration.lastReward.xpGained} XP
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         )}
 
