@@ -1,16 +1,19 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Circle, Home, Lock, MapPin, Pencil, Search, ScrollText, Trash2, X } from 'lucide-react'
+import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, Circle, Crown, Home, Lock, MapPin, Pencil, Search, ScrollText, ShieldCheck, Sparkles, Target, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
   type CheckinReward,
+  type CharacterEventLogType,
   type ConsumableItemId,
   type DailyMissionId,
   type EquipmentSlot,
   type ExplorationLocationId,
   type ExplorationReward,
+  type TitleId,
+  type WeeklyContractId,
   type XPBreakdownLine,
   CLASSES,
   CONSUMABLE_ITEMS,
@@ -50,8 +53,17 @@ import {
   canCheckin,
   canExploreLocation,
   checkinTimeRemaining,
+  claimWeeklyContract,
   completeExplorationStep,
+  equipTitle,
+  getCodexEntries,
+  getConsistencyCalendar,
+  getCycleGoals,
   getDailyMissions,
+  getFinancialEvents,
+  getNextActions,
+  getTitleViews,
+  getWeeklyContracts,
   explorationProgress,
   maxBattleDamageOnDefeat,
   performBattle,
@@ -179,10 +191,12 @@ function routePoint(fromId: ExplorationLocationId, toId: ExplorationLocationId, 
   }
 }
 
-type DetailTab = 'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'
+type DetailTab = 'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'realm' | 'history'
+type HistoryFilter = 'all' | CharacterEventLogType
 
 export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onRenameCharacter, onDeleteCharacter, onOpenRitual }: CharacterDetailPageProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('stats')
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
   const [tooltipAttr, setTooltipAttr] = useState<string | null>(null)
   const [editingMarker, setEditingMarker] = useState(false)
   const [markerValue, setMarkerValue] = useState(String(character.journeyMarker))
@@ -206,6 +220,15 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const checkinReady = canCheckin(character, new Date(nowTick))
   const checkinRemaining = checkinTimeRemaining(character, new Date(nowTick))
   const dailyMissionState = getDailyMissions(character)
+  const nextActions = getNextActions(character, new Date(nowTick))
+  const cycleGoals = getCycleGoals(character)
+  const consistencyDays = getConsistencyCalendar(character)
+  const weeklyContractState = getWeeklyContracts(character)
+  const titleViews = getTitleViews(character)
+  const codexEntries = getCodexEntries(character)
+  const financialEvents = getFinancialEvents(character)
+  const filteredEventLog = (character.eventLog ?? []).filter(entry => historyFilter === 'all' || entry.type === historyFilter)
+  const equippedTitle = titleViews.find(title => title.equipped)
   const currentExploration = character.exploration ?? {
     currentLocationId: CASTLE_LOCATION_ID,
     completedLocationIds: [],
@@ -260,6 +283,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     if (mission.target === 'shop') handleTabChange('shop')
   }
 
+  const handleActionTarget = (target: ReturnType<typeof getNextActions>[number]['target']) => {
+    if (target === 'ritual') onOpenRitual()
+    else handleTabChange(target)
+  }
+
   // Distribute attribute point
   const handleAddPoint = (attr: keyof Attributes) => {
     if (character.attributePoints <= 0) return
@@ -285,6 +313,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     { key: 'inventory', label: 'Inventário' },
     { key: 'shop', label: 'Loja' },
     { key: 'attributes', label: 'Atributos' },
+    { key: 'realm', label: 'Reino' },
     { key: 'history', label: 'Histórico' },
   ] as const
 
@@ -390,6 +419,18 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     setActionMessage([result.message, mission.awardedXP > 0 ? mission.message : ''].filter(Boolean).join(' '))
     setLastBattle(null)
     setBattleScreenOpen(false)
+  }
+
+  const handleClaimWeekly = (contractId: WeeklyContractId) => {
+    const result = claimWeeklyContract(character, contractId)
+    onUpdateCharacter(result.character)
+    setActionMessage(result.message)
+  }
+
+  const handleEquipTitle = (titleId: TitleId) => {
+    const result = equipTitle(character, titleId)
+    onUpdateCharacter(result.character)
+    setActionMessage(result.message)
   }
 
   const battleComplete = lastBattle ? visibleBattleRounds >= lastBattle.rounds.length : false
@@ -573,6 +614,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
           <div>
             <h1 className="text-xl font-bold text-foreground">{character.name}</h1>
             <p className="text-sm text-muted-foreground">{levelTitle(character.level)} · {classDef.name}</p>
+            {equippedTitle && (
+              <p className="mt-1 inline-flex rounded border border-primary/35 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                {equippedTitle.name}
+              </p>
+            )}
           </div>
 
           {/* Life + XP */}
@@ -657,6 +703,74 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
         {/* Tab: Ficha */}
         {activeTab === 'stats' && (
           <div className="space-y-4">
+            {/* Avisos inteligentes */}
+            {(lifePct <= 35 || spentPct >= 80 || (character.streakWards ?? 0) > 0) && (
+              <section className="space-y-2">
+                {lifePct <= 35 && (
+                  <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-3 text-sm">
+                    <div className="flex gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+                      <div>
+                        <p className="font-semibold text-destructive">Vida baixa: evite batalha arriscada.</p>
+                        <p className="text-xs text-muted-foreground">Use uma poção ou faça o Ritual de Registro antes de encarar a arena.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {spentPct >= 80 && (
+                  <div className="rounded-lg border border-secondary/35 bg-secondary/10 p-3 text-sm">
+                    <div className="flex gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-secondary" aria-hidden="true" />
+                      <div>
+                        <p className="font-semibold text-secondary">Tesouro em zona perigosa.</p>
+                        <p className="text-xs text-muted-foreground">{spentPct}% do limite já foi usado. Revise a cota antes de novos gastos.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(character.streakWards ?? 0) > 0 && (
+                  <div className="rounded-lg border border-primary/35 bg-primary/10 p-3 text-sm">
+                    <div className="flex gap-2">
+                      <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+                      <div>
+                        <p className="font-semibold text-primary">Selo de Continuidade ativo: {character.streakWards}</p>
+                        <p className="text-xs text-muted-foreground">Absorve uma quebra de registro no ciclo sem dano e sem zerar combo.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Próximo passo */}
+            <section className="dungeon-panel bg-card border border-primary/25 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-primary" aria-hidden="true" />
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">O que fazer agora</h3>
+              </div>
+              <div className="space-y-2">
+                {nextActions.map(action => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    onClick={() => handleActionTarget(action.target)}
+                    className={`w-full rounded border p-3 text-left transition ${
+                      action.priority === 'danger'
+                        ? 'border-destructive/35 bg-destructive/10 hover:bg-destructive/15'
+                        : action.priority === 'warning'
+                        ? 'border-secondary/35 bg-secondary/10 hover:bg-secondary/15'
+                        : action.priority === 'good'
+                        ? 'border-primary/35 bg-primary/10 hover:bg-primary/15'
+                        : 'border-border bg-black/35 hover:border-primary/30'
+                    }`}
+                  >
+                    <p className="font-semibold text-foreground text-sm">{action.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{action.description}</p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
             {/* Missões diárias */}
             <section className="dungeon-panel bg-card border border-primary/25 rounded-lg p-4 space-y-3">
               <div className="flex items-start justify-between gap-3">
@@ -723,6 +837,68 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   <p className="mt-1 text-xs text-muted-foreground">Os contratos do dia foram selados. Amanhã a guilda prepara novos desafios.</p>
                 </div>
               )}
+            </section>
+
+            {/* Objetivos do ciclo */}
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Target className="size-4 text-primary" aria-hidden="true" />
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Objetivos do Ciclo</h3>
+              </div>
+              <div className="space-y-2">
+                {cycleGoals.map(goal => {
+                  const pct = goal.target > 0 ? Math.min(100, Math.round((goal.progress / goal.target) * 100)) : goal.completed ? 100 : 0
+                  return (
+                    <div key={goal.id} className="rounded border border-border bg-black/35 p-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className={`font-semibold ${goal.completed ? 'text-primary' : 'text-foreground'}`}>{goal.title}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{goal.description}</p>
+                        </div>
+                        <span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-bold ${goal.completed ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
+                          {goal.completed ? 'feito' : `${pct}%`}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <ProgressBar value={Math.min(goal.progress, goal.target)} max={goal.target || 1} colorClass={goal.completed ? 'bg-primary' : 'bg-secondary'} />
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">Recompensa: {goal.reward}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+
+            {/* Calendário de consistência */}
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="size-4 text-primary" aria-hidden="true" />
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Calendário de Consistência</h3>
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {consistencyDays.map(day => (
+                  <div
+                    key={day.date}
+                    title={`${new Date(`${day.date}T12:00:00`).toLocaleDateString('pt-BR')}${day.amount !== undefined ? ` · R$ ${day.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}`}
+                    className={`grid aspect-square place-items-center rounded border text-[11px] font-semibold ${
+                      day.status === 'registered'
+                        ? 'border-primary/40 bg-primary/20 text-primary'
+                        : day.status === 'missed'
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : day.status === 'today'
+                        ? 'border-secondary/40 bg-secondary/10 text-secondary'
+                        : 'border-border bg-black/30 text-muted-foreground'
+                    }`}
+                  >
+                    {day.day}
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1"><span className="size-2 rounded bg-primary/70" /> Registrado</span>
+                <span className="inline-flex items-center gap-1"><span className="size-2 rounded bg-destructive/70" /> Esquecido</span>
+                <span className="inline-flex items-center gap-1"><span className="size-2 rounded bg-secondary/70" /> Hoje</span>
+              </div>
             </section>
 
             {/* Ciclo atual */}
@@ -1561,6 +1737,139 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
           </div>
         )}
 
+        {/* Tab: Reino */}
+        {activeTab === 'realm' && (
+          <div className="space-y-4">
+            <section className="dungeon-panel bg-card border border-primary/25 rounded-lg p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide flex items-center gap-2">
+                    <ScrollText className="size-4 text-primary" aria-hidden="true" />
+                    Contratos Semanais
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">Desafios maiores da guilda. Resgate XP quando concluir.</p>
+                </div>
+                <span className="shrink-0 rounded border border-border bg-black/35 px-2 py-1 text-xs text-muted-foreground">
+                  Semana {new Date(`${weeklyContractState.weekKey}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {weeklyContractState.contracts.map(contract => (
+                  <div key={contract.id} className="rounded border border-border bg-black/35 p-3 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className={`font-semibold ${contract.completed ? 'text-primary' : 'text-foreground'}`}>{contract.title}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{contract.description}</p>
+                      </div>
+                      <span className="shrink-0 rounded border border-secondary/30 bg-secondary/10 px-2 py-0.5 text-xs font-bold text-secondary">
+                        +{contract.xpReward} XP
+                      </span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <ProgressBar value={contract.progress} max={contract.target} colorClass={contract.completed ? 'bg-primary' : 'bg-secondary'} />
+                        <p className="mt-1 text-[11px] text-muted-foreground">{contract.progress}/{contract.target}</p>
+                      </div>
+                      {contract.completed ? (
+                        <Button size="sm" disabled={contract.claimed} onClick={() => handleClaimWeekly(contract.id)}>
+                          {contract.claimed ? 'Resgatado' : 'Resgatar'}
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => handleActionTarget(contract.actionTarget)}>
+                          Ir
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Crown className="size-4 text-primary" aria-hidden="true" />
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Títulos</h3>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {titleViews.map(title => (
+                  <div key={title.id} className={`rounded border p-3 text-sm ${title.unlocked ? 'border-primary/30 bg-primary/10' : 'border-border bg-black/35 opacity-75'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-foreground">{title.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{title.description}</p>
+                      </div>
+                      {title.equipped && <span className="rounded border border-primary/40 px-2 py-0.5 text-[11px] font-bold text-primary">ativo</span>}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={title.equipped ? 'outline' : 'default'}
+                      className="mt-3 w-full"
+                      disabled={!title.unlocked || title.equipped}
+                      onClick={() => handleEquipTitle(title.id)}
+                    >
+                      {!title.unlocked ? 'Bloqueado' : title.equipped ? 'Equipado' : 'Equipar'}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="size-4 text-primary" aria-hidden="true" />
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Eventos Financeiros</h3>
+              </div>
+              <div className="space-y-2">
+                {financialEvents.map(event => (
+                  <div key={event.id} className={`rounded border p-3 text-sm ${
+                    event.severity === 'danger'
+                      ? 'border-destructive/35 bg-destructive/10'
+                      : event.severity === 'warning'
+                      ? 'border-secondary/35 bg-secondary/10'
+                      : event.severity === 'good'
+                      ? 'border-primary/35 bg-primary/10'
+                      : 'border-border bg-black/35'
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-foreground">{event.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{event.description}</p>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {new Date(`${event.date}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="size-4 text-primary" aria-hidden="true" />
+                  <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Códice do Reino</h3>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {codexEntries.filter(entry => entry.unlocked).length}/{codexEntries.length}
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {codexEntries.map(entry => (
+                  <div key={entry.id} className={`rounded border p-3 text-sm ${entry.unlocked ? 'border-border bg-black/35' : 'border-border bg-black/25 opacity-60'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold text-foreground">{entry.unlocked ? entry.name : '???'}</p>
+                      <span className="rounded border border-border px-2 py-0.5 text-[10px] uppercase text-muted-foreground">{entry.kind}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{entry.description}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+
         {/* Tab: Histórico */}
         {activeTab === 'history' && (
           <div className="space-y-4">
@@ -1577,13 +1886,42 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 </span>
               </div>
 
+              <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {([
+                  ['all', 'Todos'],
+                  ['missed_day', 'Esquecimentos'],
+                  ['damage', 'Danos'],
+                  ['death', 'Mortes'],
+                  ['regen', 'Curas'],
+                  ['boss_ready', 'Boss'],
+                  ['system', 'Sistema'],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setHistoryFilter(key)}
+                    className={`shrink-0 rounded border px-2 py-1 text-xs font-semibold ${
+                      historyFilter === key
+                        ? 'border-primary/50 bg-primary/10 text-primary'
+                        : 'border-border bg-black/35 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               {(character.eventLog ?? []).length === 0 ? (
                 <p className="rounded border border-border bg-black/35 p-3 text-sm text-muted-foreground">
                   Nenhum evento importante registrado ainda.
                 </p>
+              ) : filteredEventLog.length === 0 ? (
+                <p className="rounded border border-border bg-black/35 p-3 text-sm text-muted-foreground">
+                  Nenhum evento encontrado para este filtro.
+                </p>
               ) : (
                 <div className="space-y-2">
-                  {(character.eventLog ?? []).slice(0, 25).map(entry => (
+                  {filteredEventLog.slice(0, 25).map(entry => (
                     <div key={entry.id} className="rounded border border-border bg-black/35 p-3 text-sm">
                       <div className="flex items-start justify-between gap-3">
                         <span className={`rounded border px-2 py-0.5 text-[11px] font-bold ${eventLogColor(entry.type)}`}>

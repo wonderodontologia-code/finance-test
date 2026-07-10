@@ -31,6 +31,25 @@ export type DailyMissionId =
   | 'checkin'
   | 'inspect_inventory'
   | 'buy_shop'
+export type CycleGoalId =
+  | 'stay_under_80'
+  | 'register_7_days'
+  | 'keep_life_safe'
+  | 'win_3_battles'
+  | 'preserve_gold'
+export type WeeklyContractId =
+  | 'weekly_records_5'
+  | 'weekly_battles_2'
+  | 'weekly_under_quota_3'
+  | 'weekly_inventory'
+  | 'weekly_explore_progress'
+export type TitleId =
+  | 'guardiao_da_cota'
+  | 'cartografo_do_saldo'
+  | 'campeao_da_arena'
+  | 'arquivista_do_livro'
+  | 'sobrevivente_do_tombo'
+  | 'mestre_dos_contratos'
 export type ExplorationLocationId =
   | 'castelo'
   | 'mercado_das_moedas'
@@ -133,6 +152,12 @@ export interface DailyMissionProgress {
   completedIds: DailyMissionId[]
 }
 
+export interface WeeklyContractProgress {
+  weekKey: string
+  contractIds: WeeklyContractId[]
+  claimedIds: WeeklyContractId[]
+}
+
 export interface CycleHistory {
   cycleStart: string
   cycleEnd: string
@@ -181,6 +206,10 @@ export interface Character {
   equipmentLevels: EquipmentLevels
   battleLog: BattleLog[]
   dailyMissions?: DailyMissionProgress
+  weeklyContracts?: WeeklyContractProgress
+  equippedTitleId?: TitleId
+  streakWards?: number
+  streakWardUsedThisCycle?: boolean
   lastCheckinAt?: string
   exploration: ExplorationState
   deathCount: number
@@ -708,6 +737,10 @@ export function normalizeCharacter(character: Character): Character {
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS, ...(character.equipmentLevels ?? {}) },
     battleLog: character.battleLog ?? [],
     dailyMissions: character.dailyMissions,
+    weeklyContracts: character.weeklyContracts,
+    equippedTitleId: character.equippedTitleId,
+    streakWards: character.streakWards ?? 0,
+    streakWardUsedThisCycle: character.streakWardUsedThisCycle ?? false,
     lastCheckinAt: character.lastCheckinAt,
     exploration: {
       currentLocationId: character.exploration?.currentLocationId ?? CASTLE_LOCATION_ID,
@@ -866,6 +899,10 @@ export function createCharacter(params: {
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
     battleLog: [],
     dailyMissions: undefined,
+    weeklyContracts: undefined,
+    equippedTitleId: undefined,
+    streakWards: 0,
+    streakWardUsedThisCycle: false,
     lastCheckinAt: undefined,
     exploration: {
       currentLocationId: CASTLE_LOCATION_ID,

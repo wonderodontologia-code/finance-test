@@ -3,10 +3,13 @@ import {
   type CheckinReward,
   type CharacterEventLogEntry,
   type ConsumableItemId,
+  type CycleGoalId,
   type DailyMissionId,
   type EquipmentSlot,
   type ExplorationLocationId,
   type ExplorationReward,
+  type TitleId,
+  type WeeklyContractId,
   type XPBreakdownLine,
   type CycleHistory,
   CONSUMABLE_ITEMS,
@@ -30,11 +33,78 @@ import {
 } from './types'
 
 export interface GameEvent {
-  type: 'missed_day' | 'death' | 'last_breath' | 'boss_ready' | 'regen'
+  type: 'missed_day' | 'death' | 'last_breath' | 'boss_ready' | 'regen' | 'system'
   characterId: string
   characterName: string
   message: string
   damage?: number
+}
+
+export interface ActionHint {
+  id: string
+  title: string
+  description: string
+  target: 'ritual' | 'checkin' | 'battle' | 'inventory' | 'shop' | 'explore' | 'attributes' | 'history' | 'realm'
+  priority: 'danger' | 'warning' | 'good' | 'neutral'
+}
+
+export interface CycleGoalView {
+  id: CycleGoalId
+  title: string
+  description: string
+  progress: number
+  target: number
+  completed: boolean
+  reward: string
+}
+
+export interface WeeklyContractDefinition {
+  id: WeeklyContractId
+  title: string
+  description: string
+  target: number
+  xpReward: number
+  actionTarget: ActionHint['target']
+}
+
+export interface WeeklyContractView extends WeeklyContractDefinition {
+  progress: number
+  completed: boolean
+  claimed: boolean
+}
+
+export interface TitleDefinition {
+  id: TitleId
+  name: string
+  description: string
+}
+
+export interface TitleView extends TitleDefinition {
+  unlocked: boolean
+  equipped: boolean
+}
+
+export interface CalendarDayView {
+  date: string
+  day: number
+  status: 'future' | 'registered' | 'missed' | 'today' | 'outside'
+  amount?: number
+}
+
+export interface CodexEntry {
+  id: string
+  name: string
+  description: string
+  unlocked: boolean
+  kind: 'local' | 'monstro' | 'item' | 'titulo'
+}
+
+export interface FinancialEventView {
+  id: string
+  title: string
+  description: string
+  date: string
+  severity: 'good' | 'warning' | 'danger' | 'neutral'
 }
 
 function todayISO(): string {
@@ -44,6 +114,14 @@ function todayISO(): string {
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T12:00:00')
   d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
+
+function startOfWeekISO(date = new Date()): string {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
   return d.toISOString().split('T')[0]
 }
 
@@ -243,6 +321,356 @@ export function completeDailyMission(char: Character, missionId: DailyMissionId,
   }
 }
 
+const WEEKLY_CONTRACT_POOL: WeeklyContractDefinition[] = [
+  {
+    id: 'weekly_records_5',
+    title: 'Escriba dos Cinco Selos',
+    description: 'Faça 5 Rituais de Registro nesta semana.',
+    target: 5,
+    xpReward: 35,
+    actionTarget: 'ritual',
+  },
+  {
+    id: 'weekly_battles_2',
+    title: 'Patrulha contra Cobradores',
+    description: 'Lute 2 batalhas nesta semana.',
+    target: 2,
+    xpReward: 30,
+    actionTarget: 'battle',
+  },
+  {
+    id: 'weekly_under_quota_3',
+    title: 'Guardião da Cota Semanal',
+    description: 'Registre 3 dias abaixo da Cota de Jornada.',
+    target: 3,
+    xpReward: 40,
+    actionTarget: 'ritual',
+  },
+  {
+    id: 'weekly_inventory',
+    title: 'Intendente da Mochila',
+    description: 'Tenha ao menos 1 item consumível guardado.',
+    target: 1,
+    xpReward: 25,
+    actionTarget: 'inventory',
+  },
+  {
+    id: 'weekly_explore_progress',
+    title: 'Batedor do Reino',
+    description: 'Inicie ou avance uma exploração esta semana.',
+    target: 1,
+    xpReward: 35,
+    actionTarget: 'explore',
+  },
+]
+
+const TITLES: TitleDefinition[] = [
+  { id: 'guardiao_da_cota', name: 'Guardião da Cota', description: 'Mantenha o ciclo em até 80% do Tesouro Máximo.' },
+  { id: 'cartografo_do_saldo', name: 'Cartógrafo do Saldo', description: 'Explore 3 locais do reino.' },
+  { id: 'campeao_da_arena', name: 'Campeão da Arena', description: 'Use as 3 batalhas diárias pelo menos uma vez.' },
+  { id: 'arquivista_do_livro', name: 'Arquivista do Livro', description: 'Faça 7 registros no ciclo atual.' },
+  { id: 'sobrevivente_do_tombo', name: 'Sobrevivente do Tombo', description: 'Tenha sobrevivido a pelo menos uma morte e continuado a jornada.' },
+  { id: 'mestre_dos_contratos', name: 'Mestre dos Contratos', description: 'Conclua todos os contratos diários de hoje.' },
+]
+
+function weeklyContractIds(char: Character, weekKey = startOfWeekISO()): WeeklyContractId[] {
+  return [...WEEKLY_CONTRACT_POOL]
+    .sort((a, b) => hashSeed(`${char.id}-${weekKey}-${a.id}`) - hashSeed(`${char.id}-${weekKey}-${b.id}`))
+    .slice(0, 3)
+    .map(contract => contract.id)
+}
+
+export function ensureWeeklyContracts(char: Character, weekKey = startOfWeekISO()): Character {
+  const current = normalizeCharacter(char)
+  if (current.weeklyContracts?.weekKey === weekKey && current.weeklyContracts.contractIds.length === 3) return current
+  return {
+    ...current,
+    weeklyContracts: {
+      weekKey,
+      contractIds: weeklyContractIds(current, weekKey),
+      claimedIds: [],
+    },
+  }
+}
+
+function contractDefinition(id: WeeklyContractId): WeeklyContractDefinition {
+  return WEEKLY_CONTRACT_POOL.find(contract => contract.id === id) ?? WEEKLY_CONTRACT_POOL[0]
+}
+
+function recordsThisWeek(char: Character, weekKey: string): typeof char.dailyRecords {
+  const weekEnd = addDays(weekKey, 6)
+  return char.dailyRecords.filter(record => record.date >= weekKey && record.date <= weekEnd && record.registered)
+}
+
+function weeklyContractProgress(char: Character, id: WeeklyContractId, weekKey: string): number {
+  const records = recordsThisWeek(char, weekKey)
+  if (id === 'weekly_records_5') return records.length
+  if (id === 'weekly_battles_2') {
+    const weekEnd = addDays(weekKey, 6)
+    return (char.battleLog ?? []).filter(log => log.date >= weekKey && log.date <= weekEnd).reduce((sum, log) => sum + log.count, 0)
+  }
+  if (id === 'weekly_under_quota_3') {
+    const quota = calcDaysInCycle(char.cycleStart, char.cycleEnd) > 0
+      ? (char.maxTreasure - char.journeyMarker) / calcDaysInCycle(char.cycleStart, char.cycleEnd)
+      : 0
+    return records.filter(record => quota > 0 && record.amount < quota).length
+  }
+  if (id === 'weekly_inventory') return (char.inventory ?? []).some(item => item.quantity > 0) ? 1 : 0
+  if (id === 'weekly_explore_progress') {
+    const journey = char.exploration?.activeJourney
+    return journey && dateOnly(new Date(journey.startedAt)) >= weekKey ? 1 : 0
+  }
+  return 0
+}
+
+export function getWeeklyContracts(char: Character, weekKey = startOfWeekISO()): { weekKey: string; contracts: WeeklyContractView[]; allDone: boolean } {
+  const current = ensureWeeklyContracts(char, weekKey)
+  const progress = current.weeklyContracts!
+  const claimed = new Set(progress.claimedIds)
+  const contracts = progress.contractIds.map(id => {
+    const def = contractDefinition(id)
+    const value = weeklyContractProgress(current, id, weekKey)
+    return {
+      ...def,
+      progress: Math.min(def.target, value),
+      completed: value >= def.target,
+      claimed: claimed.has(id),
+    }
+  })
+  return { weekKey, contracts, allDone: contracts.every(contract => contract.completed) }
+}
+
+export function claimWeeklyContract(char: Character, contractId: WeeklyContractId, weekKey = startOfWeekISO()): { character: Character; ok: boolean; message: string } {
+  let current = ensureWeeklyContracts(char, weekKey)
+  const state = current.weeklyContracts!
+  const contract = getWeeklyContracts(current, weekKey).contracts.find(item => item.id === contractId)
+  if (!contract) return { character: current, ok: false, message: 'Contrato semanal indisponível.' }
+  if (!contract.completed) return { character: current, ok: false, message: 'Contrato semanal ainda não foi concluído.' }
+  if (contract.claimed) return { character: current, ok: false, message: 'Recompensa já foi resgatada.' }
+
+  current = applyLevelUp({
+    ...current,
+    weeklyContracts: {
+      ...state,
+      claimedIds: [...state.claimedIds, contractId],
+    },
+    streakWards: (current.streakWards ?? 0) + (contractId === 'weekly_records_5' ? 1 : 0),
+  }, contract.xpReward)
+
+  const wardText = contractId === 'weekly_records_5' ? ' Você também ganhou 1 Selo de Continuidade.' : ''
+  return {
+    character: appendEventLog(current, {
+      type: 'system',
+      date: new Date().toISOString(),
+      message: `Contrato semanal concluído: ${contract.title}. +${contract.xpReward} XP.${wardText}`,
+    }),
+    ok: true,
+    message: `Contrato resgatado: ${contract.title}. +${contract.xpReward} XP.${wardText}`,
+  }
+}
+
+export function getCycleGoals(char: Character): CycleGoalView[] {
+  const current = normalizeCharacter(char)
+  const daysTotal = calcDaysInCycle(current.cycleStart, current.cycleEnd)
+  const totalSpent = calcOuroConsumido(current)
+  const preserved = Math.max(0, current.maxTreasure - totalSpent)
+  const quota = current.maxTreasure * 0.8
+  return [
+    {
+      id: 'stay_under_80',
+      title: 'Muralha dos 80%',
+      description: 'Mantenha o Ouro Consumido em até 80% do Tesouro Máximo.',
+      progress: Math.min(quota, totalSpent),
+      target: quota,
+      completed: totalSpent <= quota,
+      reward: 'Melhor chance de vitória épica no Boss Final',
+    },
+    {
+      id: 'register_7_days',
+      title: 'Sete Selos do Livro',
+      description: 'Faça pelo menos 7 registros neste ciclo.',
+      progress: current.dailyRecords.filter(record => record.registered).length,
+      target: Math.min(7, daysTotal),
+      completed: current.dailyRecords.filter(record => record.registered).length >= Math.min(7, daysTotal),
+      reward: 'Desbloqueia título de consistência',
+    },
+    {
+      id: 'keep_life_safe',
+      title: 'Chama Acima da Metade',
+      description: 'Mantenha a vida acima de 50% para batalhar com segurança.',
+      progress: current.life,
+      target: Math.ceil(current.maxLife / 2),
+      completed: current.life >= Math.ceil(current.maxLife / 2),
+      reward: 'Menos risco em batalhas e esquecimentos',
+    },
+    {
+      id: 'win_3_battles',
+      title: 'Três Cobranças Vencidas',
+      description: 'Realize 3 batalhas no ciclo atual.',
+      progress: (current.battleLog ?? []).reduce((sum, log) => sum + log.count, 0),
+      target: 3,
+      completed: (current.battleLog ?? []).reduce((sum, log) => sum + log.count, 0) >= 3,
+      reward: 'Desbloqueia título de arena',
+    },
+    {
+      id: 'preserve_gold',
+      title: 'Baú Ainda Respira',
+      description: 'Termine o ciclo com algum Ouro Preservado.',
+      progress: preserved,
+      target: Math.max(1, current.maxTreasure * 0.05),
+      completed: preserved > 0,
+      reward: 'Ouro preservado vai para o Baú no Boss Final',
+    },
+  ]
+}
+
+export function getTitleViews(char: Character): TitleView[] {
+  const current = normalizeCharacter(char)
+  const totalSpent = calcOuroConsumido(current)
+  const explored = current.exploration?.completedLocationIds?.filter(id => id !== CASTLE_LOCATION_ID).length ?? 0
+  const dailyMissions = getDailyMissions(current)
+  const battles = battlesToday(current)
+  const records = current.dailyRecords.filter(record => record.registered).length
+  const unlocked: Record<TitleId, boolean> = {
+    guardiao_da_cota: current.maxTreasure > 0 && totalSpent <= current.maxTreasure * 0.8,
+    cartografo_do_saldo: explored >= 3,
+    campeao_da_arena: battles >= 3,
+    arquivista_do_livro: records >= 7,
+    sobrevivente_do_tombo: (current.deathCount ?? 0) > 0,
+    mestre_dos_contratos: dailyMissions.allDone,
+  }
+  return TITLES.map(title => ({
+    ...title,
+    unlocked: unlocked[title.id],
+    equipped: current.equippedTitleId === title.id,
+  }))
+}
+
+export function equipTitle(char: Character, titleId: TitleId): { character: Character; ok: boolean; message: string } {
+  const title = getTitleViews(char).find(item => item.id === titleId)
+  if (!title) return { character: char, ok: false, message: 'Título inexistente.' }
+  if (!title.unlocked) return { character: char, ok: false, message: 'Esse título ainda está bloqueado.' }
+  return {
+    character: { ...normalizeCharacter(char), equippedTitleId: titleId },
+    ok: true,
+    message: `Título equipado: ${title.name}.`,
+  }
+}
+
+export function getConsistencyCalendar(char: Character): CalendarDayView[] {
+  const current = normalizeCharacter(char)
+  const today = todayISO()
+  const records = new Map(current.dailyRecords.map(record => [record.date, record]))
+  return daysBetween(current.cycleStart, current.cycleEnd).map(date => {
+    const record = records.get(date)
+    const day = new Date(`${date}T12:00:00`).getDate()
+    if (date > today) return { date, day, status: 'future' }
+    if (record?.registered) return { date, day, status: 'registered', amount: record.amount }
+    if (date === today) return { date, day, status: 'today' }
+    return { date, day, status: 'missed' }
+  })
+}
+
+export function getNextActions(char: Character, now = new Date()): ActionHint[] {
+  const current = normalizeCharacter(char)
+  const today = todayISO()
+  const registeredToday = current.dailyRecords.some(record => record.date === today && record.registered)
+  const actions: ActionHint[] = []
+  const lifePct = current.maxLife > 0 ? current.life / current.maxLife : 1
+  const spentPct = current.maxTreasure > 0 ? calcOuroConsumido(current) / current.maxTreasure : 0
+  const daily = getDailyMissions(current)
+  const weekly = getWeeklyContracts(current)
+
+  if (lifePct <= 0.35) actions.push({ id: 'life-low', title: 'Vida em risco', description: 'Use uma poção ou registre hoje antes de entrar em batalha.', target: current.inventory.length > 0 ? 'inventory' : 'ritual', priority: 'danger' })
+  if (spentPct >= 0.9) actions.push({ id: 'budget-high', title: 'Tesouro quase no limite', description: 'Revise o ciclo antes de novos gastos.', target: 'history', priority: 'warning' })
+  if (!registeredToday) actions.push({ id: 'register', title: 'Realizar Ritual de Registro', description: 'O registro de hoje ainda não foi feito.', target: 'ritual', priority: 'good' })
+  if (!daily.allDone) actions.push({ id: 'daily', title: 'Concluir contratos diários', description: `${daily.missions.filter(m => m.completed).length}/2 contratos concluídos hoje.`, target: 'realm', priority: 'neutral' })
+  if (canCheckin(current, now)) actions.push({ id: 'checkin', title: 'Ronda do Tesouro pronta', description: 'A ronda pode render XP, ouro ou poções.', target: 'checkin', priority: 'good' })
+  if (current.exploration.activeJourney && explorationProgress(current, now).readyToComplete) actions.push({ id: 'explore-complete', title: 'Exploração pronta', description: 'A caravana chegou ao destino. Resgate a recompensa.', target: 'explore', priority: 'good' })
+  if (weekly.contracts.some(contract => contract.completed && !contract.claimed)) actions.push({ id: 'weekly-claim', title: 'Contrato semanal para resgatar', description: 'Há recompensa semanal esperando na guilda.', target: 'realm', priority: 'good' })
+  if (current.attributePoints > 0) actions.push({ id: 'attributes', title: 'Distribuir atributos', description: `${current.attributePoints} ponto(s) disponíveis.`, target: 'attributes', priority: 'neutral' })
+  if (actions.length === 0) actions.push({ id: 'ok', title: 'Reino em ordem', description: 'Nada urgente agora. Você pode explorar, batalhar ou revisar o histórico.', target: 'explore', priority: 'neutral' })
+  return actions.slice(0, 4)
+}
+
+export function getCodexEntries(char: Character): CodexEntry[] {
+  const current = normalizeCharacter(char)
+  const explored = new Set(current.exploration.completedLocationIds ?? [])
+  const battleCount = (current.battleLog ?? []).reduce((sum, log) => sum + log.count, 0)
+  const titleViews = getTitleViews(current)
+  const equipmentEntries = (Object.keys(EQUIPMENT_SLOTS) as EquipmentSlot[]).map(slot => {
+    const level = current.equipmentLevels?.[slot] ?? 0
+    return {
+      id: `equip-${slot}`,
+      name: slot === 'weapon' ? weaponNameForClass(current.class) : EQUIPMENT_SLOTS[slot].baseName,
+      description: level > 0 ? `Encontrado ou aprimorado até o nível ${level}.` : 'Ainda não encontrado na jornada.',
+      unlocked: level > 0,
+      kind: 'item' as const,
+    }
+  })
+  return [
+    ...EXPLORATION_LOCATIONS.filter(location => location.id !== CASTLE_LOCATION_ID).map(location => ({
+      id: `loc-${location.id}`,
+      name: location.name,
+      description: explored.has(location.id) ? location.description : `Requer nível ${location.minLevel}.`,
+      unlocked: explored.has(location.id),
+      kind: 'local' as const,
+    })),
+    {
+      id: 'monster-cobrador',
+      name: 'Cobrador da Masmorra',
+      description: battleCount > 0 ? `${battleCount} encontro(s) registrados na arena.` : 'Enfrente uma batalha para catalogar este inimigo.',
+      unlocked: battleCount > 0,
+      kind: 'monstro' as const,
+    },
+    ...equipmentEntries,
+    ...titleViews.map(title => ({
+      id: `title-${title.id}`,
+      name: title.name,
+      description: title.description,
+      unlocked: title.unlocked,
+      kind: 'titulo' as const,
+    })),
+  ]
+}
+
+export function getFinancialEvents(char: Character): FinancialEventView[] {
+  const current = normalizeCharacter(char)
+  const today = todayISO()
+  const daysLeft = Math.max(0, Math.round((new Date(current.cycleEnd).getTime() - new Date(today).getTime()) / (24 * 60 * 60 * 1000)))
+  const spentPct = current.maxTreasure > 0 ? calcOuroConsumido(current) / current.maxTreasure : 0
+  const events: FinancialEventView[] = []
+  events.push({
+    id: 'boss',
+    title: daysLeft <= 3 ? 'Boss Final se aproxima' : 'Boss Final do ciclo',
+    description: `${daysLeft} dia(s) até o fechamento do ciclo.`,
+    date: current.cycleEnd,
+    severity: daysLeft <= 3 ? 'warning' : 'neutral',
+  })
+  if (spentPct >= 0.8) {
+    events.push({
+      id: 'treasure-alert',
+      title: spentPct >= 1 ? 'Tesouro ultrapassado' : 'Tesouro em zona perigosa',
+      description: `${Math.round(spentPct * 100)}% do Tesouro Máximo já foi consumido.`,
+      date: today,
+      severity: spentPct >= 1 ? 'danger' : 'warning',
+    })
+  }
+  if (current.lastCheckinAt) {
+    const next = nextCheckinAt(current)
+    if (next) {
+      events.push({
+        id: 'next-checkin',
+        title: 'Próxima Ronda do Tesouro',
+        description: 'Volte para uma recompensa rápida e manutenção do hábito.',
+        date: next.toISOString().split('T')[0],
+        severity: canCheckin(current) ? 'good' : 'neutral',
+      })
+    }
+  }
+  return events
+}
+
 function handleDeath(char: Character): Character {
   const classDef = CLASSES.find(c => c.id === char.class)!
   const attrs = { ...classDef.startingAttributes }
@@ -266,6 +694,8 @@ function handleDeath(char: Character): Character {
     inventory: [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
     battleLog: [],
+    dailyMissions: undefined,
+    weeklyContracts: undefined,
     lastCheckinAt: undefined,
     exploration: {
       currentLocationId: CASTLE_LOCATION_ID,
@@ -274,10 +704,30 @@ function handleDeath(char: Character): Character {
     deathCount: (char.deathCount ?? 0) + 1,
     goldChest,
     lastBreathRecoveryDays: 0,
+    streakWards: 0,
+    streakWardUsedThisCycle: false,
   }
 }
 
 function applyMissedDay(char: Character): { character: Character; event: GameEvent } {
+  if ((char.streakWards ?? 0) > 0 && !char.streakWardUsedThisCycle) {
+    const updated = {
+      ...char,
+      streakWards: Math.max(0, (char.streakWards ?? 0) - 1),
+      streakWardUsedThisCycle: true,
+    }
+    return {
+      character: updated,
+      event: {
+        type: 'system',
+        characterId: char.id,
+        characterName: char.name,
+        message: `Um Selo de Continuidade protegeu ${char.name}: sem dano e sem quebra de combo pelo esquecimento.`,
+        damage: 0,
+      },
+    }
+  }
+
   const classDef = CLASSES.find(c => c.id === char.class)!
   const { min, max } = calcDamage(char.level, calcEffectiveAttributes(char))
   let damage = randomDamage(min, max)
@@ -458,6 +908,9 @@ export function startNewCycle(
     sealUsed: false,
     masterStrikeUsedThisWeek: false,
     lastProcessedDate: undefined,
+    dailyMissions: undefined,
+    weeklyContracts: undefined,
+    streakWardUsedThisCycle: false,
     goldChest: (char.goldChest ?? 0) + history.goldPreserved,
     cycleHistory: [...char.cycleHistory, history],
   }, 20)
