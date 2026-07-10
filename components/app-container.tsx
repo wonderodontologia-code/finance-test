@@ -8,11 +8,83 @@ import GuildPage from './pages/guild-page'
 import CharacterDetailPage from './pages/character-detail-page'
 import BossFinalPage from './pages/boss-final-page'
 import RitualRegisterModal from './ritual-register-modal'
-import { type Character } from '@/lib/types'
+import { Button } from '@/components/ui/button'
+import { type Character, CLASSES, classImageForLevel, levelTitle } from '@/lib/types'
 import { createBackup, loadState, parseBackup, saveState, clearState } from '@/lib/storage'
 import { processDailyChecks, getCharactersNeedingBoss } from '@/lib/game-engine'
 
 type PageType = 'landing' | 'login' | 'onboarding' | 'guild' | 'character-detail' | 'boss-final'
+
+interface LevelUpState {
+  characterName: string
+  className: string
+  classImageSrc: string
+  fromLevel: number
+  toLevel: number
+  newTitle: string
+  pointsGained: number
+}
+
+function LevelUpModal({ levelUp, onClose }: { levelUp: LevelUpState; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-4 backdrop-blur-sm sm:items-center">
+      <div className="dungeon-panel gold-frame w-full max-w-md overflow-hidden rounded-lg border border-primary/50 bg-card shadow-2xl">
+        <div className="relative bg-black">
+          <img
+            src="/items/level-up.png"
+            alt=""
+            className="aspect-square w-full object-cover"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+          <div className="absolute bottom-4 left-4 right-4 text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.3em] text-primary">Ascensão</p>
+            <h2 className="rpg-title mt-1 text-3xl font-bold text-foreground">Nível Aumentou!</h2>
+          </div>
+        </div>
+
+        <div className="space-y-4 p-5 text-center">
+          <div className="flex items-center justify-center gap-4">
+            <img
+              src={levelUp.classImageSrc}
+              alt=""
+              className="size-20 rounded border border-primary/35 bg-black/45 object-contain p-1"
+              style={{ imageRendering: 'pixelated' }}
+            />
+            <div className="text-left">
+              <p className="font-bold text-foreground">{levelUp.characterName}</p>
+              <p className="text-xs text-muted-foreground">{levelUp.className}</p>
+              <p className="mt-1 text-sm font-semibold text-primary">{levelUp.newTitle}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="rounded border border-border bg-black/35 p-3">
+              <p className="text-xs text-muted-foreground">Antes</p>
+              <p className="text-xl font-bold text-foreground">Nv. {levelUp.fromLevel}</p>
+            </div>
+            <div className="rounded border border-primary/40 bg-primary/10 p-3">
+              <p className="text-xs text-muted-foreground">Agora</p>
+              <p className="text-xl font-bold text-primary">Nv. {levelUp.toLevel}</p>
+            </div>
+            <div className="rounded border border-secondary/40 bg-secondary/10 p-3">
+              <p className="text-xs text-muted-foreground">Atributos</p>
+              <p className="text-xl font-bold text-secondary">+{levelUp.pointsGained}</p>
+            </div>
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            O reino reconhece tua constância. Distribua os novos pontos de atributo para fortalecer o personagem.
+          </p>
+
+          <Button onClick={onClose} className="w-full py-3 text-base font-semibold">
+            Continuar jornada
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function AppContainer() {
   const [hydrated, setHydrated] = useState(false)
@@ -23,6 +95,7 @@ export default function AppContainer() {
   const [ritualCharacterId, setRitualCharacterId] = useState<string | null>(null)
   const [bossCharacterId, setBossCharacterId] = useState<string | null>(null)
   const [gameEvents, setGameEvents] = useState<string[]>([])
+  const [levelUp, setLevelUp] = useState<LevelUpState | null>(null)
 
   // Hydrate from localStorage
   useEffect(() => {
@@ -54,8 +127,22 @@ export default function AppContainer() {
   }, [hydrated, userName, characters, currentPage])
 
   const updateCharacter = useCallback((updated: Character) => {
+    const previous = characters.find(c => c.id === updated.id)
+    if (previous && updated.level > previous.level) {
+      const classDef = CLASSES.find(cls => cls.id === updated.class)!
+      const classImage = classImageForLevel(classDef, updated.level)
+      setLevelUp({
+        characterName: updated.name,
+        className: classDef.name,
+        classImageSrc: classImage.src,
+        fromLevel: previous.level,
+        toLevel: updated.level,
+        newTitle: levelTitle(updated.level),
+        pointsGained: Math.max(0, updated.level - previous.level),
+      })
+    }
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
-  }, [])
+  }, [characters])
 
   const handleRenameCharacter = useCallback((id: string) => {
     const character = characters.find(c => c.id === id)
@@ -184,6 +271,10 @@ export default function AppContainer() {
             <button onClick={dismissEvents} className="text-xs text-primary font-semibold">Entendi</button>
           </div>
         </div>
+      )}
+
+      {levelUp && (
+        <LevelUpModal levelUp={levelUp} onClose={() => setLevelUp(null)} />
       )}
 
       {currentPage === 'landing' && (

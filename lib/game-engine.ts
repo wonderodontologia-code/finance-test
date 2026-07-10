@@ -3,9 +3,11 @@ import {
   type CheckinReward,
   type CharacterEventLogEntry,
   type ConsumableItemId,
+  type DailyMissionId,
   type EquipmentSlot,
   type ExplorationLocationId,
   type ExplorationReward,
+  type XPBreakdownLine,
   type CycleHistory,
   CONSUMABLE_ITEMS,
   CLASSES,
@@ -100,6 +102,145 @@ function applyLevelUp(char: Character, xpGain: number): Character {
   const leveled = { ...char, level, xp, xpToNextLevel: xpToNext, attributePoints: attrPoints }
   const maxLife = calcMaxLife(level, calcEffectiveAttributes(leveled), classDef)
   return { ...char, xp, level, xpToNextLevel: xpToNext, attributePoints: attrPoints, maxLife }
+}
+
+export const DAILY_MISSION_XP = 5
+
+export interface DailyMissionDefinition {
+  id: DailyMissionId
+  title: string
+  description: string
+  actionLabel: string
+  target: 'ritual' | 'checkin' | 'battle' | 'inventory' | 'shop'
+}
+
+export interface DailyMissionView extends DailyMissionDefinition {
+  completed: boolean
+  xp: number
+}
+
+const DAILY_MISSION_POOL: DailyMissionDefinition[] = [
+  {
+    id: 'ritual_register',
+    title: 'Selar o Livro de Gastos',
+    description: 'Faça o Ritual de Registro de hoje.',
+    actionLabel: 'Registrar agora',
+    target: 'ritual',
+  },
+  {
+    id: 'battle',
+    title: 'Enfrentar um Cobrador',
+    description: 'Lute uma batalha na Arena da Masmorra.',
+    actionLabel: 'Ir para batalha',
+    target: 'battle',
+  },
+  {
+    id: 'checkin',
+    title: 'Fazer a Ronda do Tesouro',
+    description: 'Conclua uma Ronda do Tesouro.',
+    actionLabel: 'Abrir ronda',
+    target: 'checkin',
+  },
+  {
+    id: 'inspect_inventory',
+    title: 'Conferir a Mochila',
+    description: 'Abra o inventário e revise seus itens.',
+    actionLabel: 'Ver inventário',
+    target: 'inventory',
+  },
+  {
+    id: 'buy_shop',
+    title: 'Negociar no Mercado Sombrio',
+    description: 'Compre uma poção ou aprimore um equipamento na loja.',
+    actionLabel: 'Abrir loja',
+    target: 'shop',
+  },
+]
+
+function hashSeed(value: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function dailyMissionIds(char: Character, date = todayISO()): DailyMissionId[] {
+  return [...DAILY_MISSION_POOL]
+    .sort((a, b) => hashSeed(`${char.id}-${date}-${a.id}`) - hashSeed(`${char.id}-${date}-${b.id}`))
+    .slice(0, 2)
+    .map(mission => mission.id)
+}
+
+export function ensureDailyMissions(char: Character, date = todayISO()): Character {
+  const current = normalizeCharacter(char)
+  if (current.dailyMissions?.date === date && current.dailyMissions.missionIds.length === 2) {
+    return current
+  }
+  return {
+    ...current,
+    dailyMissions: {
+      date,
+      missionIds: dailyMissionIds(current, date),
+      completedIds: [],
+    },
+  }
+}
+
+function missionDefinition(id: DailyMissionId): DailyMissionDefinition {
+  return DAILY_MISSION_POOL.find(mission => mission.id === id) ?? DAILY_MISSION_POOL[0]
+}
+
+function actionAlreadyDone(char: Character, id: DailyMissionId, date: string): boolean {
+  if (id === 'ritual_register') {
+    return char.dailyRecords.some(record => record.date === date && record.registered)
+  }
+  if (id === 'battle') return (char.battleLog ?? []).some(log => log.date === date && log.count > 0)
+  if (id === 'checkin') return char.lastCheckinAt ? dateOnly(new Date(char.lastCheckinAt)) === date : false
+  return false
+}
+
+export function getDailyMissions(char: Character, date = todayISO()): { date: string; missions: DailyMissionView[]; allDone: boolean } {
+  const current = ensureDailyMissions(char, date)
+  const progress = current.dailyMissions!
+  const completedIds = new Set(progress.completedIds)
+  const missions = progress.missionIds.map(id => ({
+    ...missionDefinition(id),
+    completed: completedIds.has(id) || actionAlreadyDone(current, id, date),
+    xp: DAILY_MISSION_XP,
+  }))
+  return {
+    date,
+    missions,
+    allDone: missions.every(mission => mission.completed),
+  }
+}
+
+export function completeDailyMission(char: Character, missionId: DailyMissionId, date = todayISO()): { character: Character; awardedXP: number; message?: string } {
+  let current = ensureDailyMissions(char, date)
+  const progress = current.dailyMissions!
+  if (!progress.missionIds.includes(missionId)) {
+    return { character: current, awardedXP: 0 }
+  }
+  if (progress.completedIds.includes(missionId)) {
+    return { character: current, awardedXP: 0 }
+  }
+
+  current = {
+    ...current,
+    dailyMissions: {
+      ...progress,
+      completedIds: [...progress.completedIds, missionId],
+    },
+  }
+  current = applyLevelUp(current, DAILY_MISSION_XP)
+
+  return {
+    character: current,
+    awardedXP: DAILY_MISSION_XP,
+    message: `Missão diária concluída: ${missionDefinition(missionId).title}. +${DAILY_MISSION_XP} XP.`,
+  }
 }
 
 function handleDeath(char: Character): Character {
@@ -335,6 +476,7 @@ export interface BattleResult {
   monsterHpStart: number
   monsterHpEnd: number
   rounds: BattleRound[]
+  xpBreakdown?: XPBreakdownLine[]
   itemGained?: ConsumableItemId
   died?: boolean
 }
@@ -543,7 +685,16 @@ function buildExplorationReward(char: Character, locationId: ExplorationLocation
   let current = normalizeCharacter(char)
   const location = explorationLocation(locationId)
   const attrs = calcEffectiveAttributes(current)
-  const xpGained = Math.round(location.xpBase + current.level * 5 + attrs.sabedoria * 1.5)
+  const levelXP = current.level * 5
+  const sabedoriaXP = Math.round(attrs.sabedoria * 1.5)
+  const xpGained = Math.round(location.xpBase + levelXP + sabedoriaXP)
+  const xpBreakdown: XPBreakdownLine[] = [
+    { label: 'XP do local', value: location.xpBase, detail: location.name, kind: 'base' },
+    { label: 'Bônus de nível', value: levelXP, detail: `Nível ${current.level} x 5`, kind: 'level' },
+  ]
+  if (sabedoriaXP > 0) {
+    xpBreakdown.push({ label: 'Bônus de Sabedoria', value: sabedoriaXP, detail: `${attrs.sabedoria} Sabedoria`, kind: 'attribute' })
+  }
   const dropRoll = Math.random()
   current = applyLevelUp(current, xpGained)
 
@@ -567,6 +718,7 @@ function buildExplorationReward(char: Character, locationId: ExplorationLocation
           label: `${equipmentRewardName(current, slot)} Nv. ${nextLevel}`,
           imageSrc: equipmentRewardImage(current, slot),
           xpGained,
+          xpBreakdown,
           equipmentSlotGained: slot,
           equipmentLevelGained: nextLevel,
         },
@@ -584,6 +736,7 @@ function buildExplorationReward(char: Character, locationId: ExplorationLocation
         label: CONSUMABLE_ITEMS[itemGained].name,
         imageSrc: CONSUMABLE_ITEMS[itemGained].imageSrc,
         xpGained,
+        xpBreakdown,
         itemGained,
       },
     }
@@ -601,6 +754,7 @@ function buildExplorationReward(char: Character, locationId: ExplorationLocation
       label: `+R$ ${goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
       imageSrc: GOLD_REWARD_IMAGE_SRC,
       xpGained,
+      xpBreakdown,
       goldGained,
     },
   }
@@ -689,13 +843,24 @@ export function performCheckin(char: Character): CheckinResult {
   let reward: CheckinReward
 
   if (roll < 0.45) {
-    const xpGained = Math.round(10 + current.level * 3 + attrs.sabedoria * 1.4)
+    const baseXP = 10
+    const levelXP = current.level * 3
+    const sabedoriaXP = Math.round(attrs.sabedoria * 1.4)
+    const xpGained = Math.round(baseXP + levelXP + sabedoriaXP)
+    const xpBreakdown: XPBreakdownLine[] = [
+      { label: 'XP da Ronda', value: baseXP, kind: 'base' },
+      { label: 'Bônus de nível', value: levelXP, detail: `Nível ${current.level} x 3`, kind: 'level' },
+    ]
+    if (sabedoriaXP > 0) {
+      xpBreakdown.push({ label: 'Bônus de Sabedoria', value: sabedoriaXP, detail: `${attrs.sabedoria} Sabedoria`, kind: 'attribute' })
+    }
     current = applyLevelUp(current, xpGained)
     reward = {
       type: 'xp',
       label: `+${xpGained} XP`,
       imageSrc: XP_REWARD_IMAGE_SRC,
       xpGained,
+      xpBreakdown,
     }
   } else if (roll < 0.75) {
     const goldGained = Math.round(8 + current.level * 3 + attrs.prosperidade * 2)
@@ -834,8 +999,8 @@ export function performBattle(char: Character): BattleResult {
         playerHp,
         monsterHp,
         text: critical
-          ? `${monsterName} acertou um crítico e drenou ${damage} de vida temporária.`
-          : `${monsterName} contra-atacou e causou ${damage} de dano temporário.`,
+          ? `${monsterName} acertou um crítico e drenou ${damage} de vida de batalha.`
+          : `${monsterName} contra-atacou e causou ${damage} de dano na vida de batalha.`,
       })
     }
   }
@@ -845,7 +1010,17 @@ export function performBattle(char: Character): BattleResult {
   current = incrementBattleCount(current)
 
   if (won) {
-    const xpGained = Math.round(18 + current.level * 4 + attrs.sabedoria * 1.5)
+    const baseXP = 18
+    const levelXP = current.level * 4
+    const sabedoriaXP = Math.round(attrs.sabedoria * 1.5)
+    const xpGained = Math.round(baseXP + levelXP + sabedoriaXP)
+    const xpBreakdown: XPBreakdownLine[] = [
+      { label: 'XP da vitória', value: baseXP, kind: 'base' },
+      { label: 'Bônus de nível', value: levelXP, detail: `Nível ${current.level} x 4`, kind: 'level' },
+    ]
+    if (sabedoriaXP > 0) {
+      xpBreakdown.push({ label: 'Bônus de Sabedoria', value: sabedoriaXP, detail: `${attrs.sabedoria} Sabedoria`, kind: 'attribute' })
+    }
     let goldGained = 0
     let itemGained: ConsumableItemId | undefined
     const lootRoll = Math.random()
@@ -875,12 +1050,16 @@ export function performBattle(char: Character): BattleResult {
       monsterHpStart,
       monsterHpEnd: monsterHp,
       rounds,
+      xpBreakdown,
       itemGained,
     }
   }
 
   const reduced = defeatDamage
   const lossXp = Math.max(3, Math.round(current.level * 1.5))
+  const lossXpBreakdown: XPBreakdownLine[] = [
+    { label: 'XP de sobrevivência', value: lossXp, detail: `Baseado no nível ${current.level}`, kind: 'level' },
+  ]
   current = applyLevelUp({
     ...current,
     life: Math.max(0, current.life - reduced),
@@ -908,6 +1087,7 @@ export function performBattle(char: Character): BattleResult {
     monsterHpStart,
     monsterHpEnd: monsterHp,
     rounds,
+    xpBreakdown: lossXpBreakdown,
     died: false,
   }
 }

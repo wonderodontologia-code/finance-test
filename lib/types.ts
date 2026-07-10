@@ -25,6 +25,12 @@ export type EquipmentSlot = 'head' | 'armor' | 'gloves' | 'weapon'
 export type ConsumableItemId = 'pocao_pequena' | 'pocao_grande'
 export type CheckinRewardType = 'xp' | 'gold' | 'item'
 export type ExplorationRewardType = 'xp' | 'gold' | 'consumable' | 'equipment'
+export type DailyMissionId =
+  | 'ritual_register'
+  | 'battle'
+  | 'checkin'
+  | 'inspect_inventory'
+  | 'buy_shop'
 export type ExplorationLocationId =
   | 'castelo'
   | 'mercado_das_moedas'
@@ -57,8 +63,16 @@ export interface CheckinReward {
   label: string
   imageSrc: string
   xpGained?: number
+  xpBreakdown?: XPBreakdownLine[]
   goldGained?: number
   itemGained?: ConsumableItemId
+}
+
+export interface XPBreakdownLine {
+  label: string
+  value: number
+  detail?: string
+  kind?: 'base' | 'level' | 'attribute' | 'class' | 'combo' | 'reward'
 }
 
 export type CharacterEventLogType =
@@ -84,6 +98,7 @@ export interface ExplorationReward {
   label: string
   imageSrc: string
   xpGained: number
+  xpBreakdown?: XPBreakdownLine[]
   goldGained?: number
   itemGained?: ConsumableItemId
   equipmentSlotGained?: EquipmentSlot
@@ -110,6 +125,12 @@ export interface DailyRecord {
   amount: number
   xpGained: number
   registered: boolean
+}
+
+export interface DailyMissionProgress {
+  date: string
+  missionIds: DailyMissionId[]
+  completedIds: DailyMissionId[]
 }
 
 export interface CycleHistory {
@@ -159,6 +180,7 @@ export interface Character {
   inventory: InventoryItem[]
   equipmentLevels: EquipmentLevels
   battleLog: BattleLog[]
+  dailyMissions?: DailyMissionProgress
   lastCheckinAt?: string
   exploration: ExplorationState
   deathCount: number
@@ -685,6 +707,7 @@ export function normalizeCharacter(character: Character): Character {
     inventory: character.inventory ?? [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS, ...(character.equipmentLevels ?? {}) },
     battleLog: character.battleLog ?? [],
+    dailyMissions: character.dailyMissions,
     lastCheckinAt: character.lastCheckinAt,
     exploration: {
       currentLocationId: character.exploration?.currentLocationId ?? CASTLE_LOCATION_ID,
@@ -736,23 +759,57 @@ export function calcRegistrationXP(
   quota: number,
   attributes: Attributes,
   classDef: ClassDefinition
-): { base: number; daily: number; bonus: number; total: number } {
+): {
+  base: number
+  daily: number
+  bonus: number
+  total: number
+  baseRaw: number
+  sabedoriaBonus: number
+  classBaseBonus: number
+  savedBonusBase: number
+  disciplinaBonus: number
+  classSavedBonus: number
+} {
   const sabedoriaMult = 1 + attributes.sabedoria * 0.05
-  const base = Math.round(10 * sabedoriaMult * (classDef.id === 'mago' ? 1.15 : 1))
+  const baseRaw = 10
+  const afterSabedoria = Math.round(baseRaw * sabedoriaMult)
+  const base = Math.round(baseRaw * sabedoriaMult * (classDef.id === 'mago' ? 1.15 : 1))
+  const sabedoriaBonus = Math.max(0, afterSabedoria - baseRaw)
+  const classBaseBonus = Math.max(0, base - afterSabedoria)
 
-  const daily = 5
+  const daily = 0
 
   let bonus = 0
-  if (amount < quota) {
+  let savedBonusBase = 0
+  let disciplinaBonus = 0
+  let classSavedBonus = 0
+  if (amount < quota && quota > 0) {
     const saved = quota - amount
     const ratio = saved / quota
     const disciplinaMult = 1 + attributes.disciplina * 0.1
     const ladinoBonusMult = classDef.id === 'ladino' && amount < quota * 0.5 ? 1.25 : 1
     const magoMult = classDef.id === 'mago' ? 1.2 : 1
-    bonus = Math.round(20 * ratio * disciplinaMult * ladinoBonusMult * magoMult)
+    savedBonusBase = Math.round(20 * ratio)
+    const afterDisciplina = Math.round(20 * ratio * disciplinaMult)
+    const afterClass = Math.round(20 * ratio * disciplinaMult * ladinoBonusMult * magoMult)
+    disciplinaBonus = Math.max(0, afterDisciplina - savedBonusBase)
+    classSavedBonus = Math.max(0, afterClass - afterDisciplina)
+    bonus = afterClass
   }
 
-  return { base, daily, bonus, total: base + daily + bonus }
+  return {
+    base,
+    daily,
+    bonus,
+    total: base + daily + bonus,
+    baseRaw,
+    sabedoriaBonus,
+    classBaseBonus,
+    savedBonusBase,
+    disciplinaBonus,
+    classSavedBonus,
+  }
 }
 
 export function calcDamage(level: number, attributes: Attributes): { min: number; max: number } {
@@ -808,6 +865,7 @@ export function createCharacter(params: {
     inventory: [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
     battleLog: [],
+    dailyMissions: undefined,
     lastCheckinAt: undefined,
     exploration: {
       currentLocationId: CASTLE_LOCATION_ID,

@@ -1,15 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Home, Lock, MapPin, Pencil, Search, Trash2, X } from 'lucide-react'
+import { CheckCircle2, Circle, Home, Lock, MapPin, Pencil, Search, ScrollText, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
   type CheckinReward,
   type ConsumableItemId,
+  type DailyMissionId,
   type EquipmentSlot,
   type ExplorationLocationId,
   type ExplorationReward,
+  type XPBreakdownLine,
   CLASSES,
   CONSUMABLE_ITEMS,
   EQUIPMENT_SLOTS,
@@ -41,6 +43,7 @@ import {
   type CheckinResult,
   CHECKIN_ACTION_NAME,
   CHECKIN_COOLDOWN_HOURS,
+  completeDailyMission,
   battlesToday,
   buyConsumable,
   buyEquipmentUpgrade,
@@ -48,6 +51,7 @@ import {
   canExploreLocation,
   checkinTimeRemaining,
   completeExplorationStep,
+  getDailyMissions,
   explorationProgress,
   maxBattleDamageOnDefeat,
   performBattle,
@@ -142,6 +146,25 @@ function eventLogColor(type: string): string {
   return 'text-muted-foreground border-border bg-black/35'
 }
 
+function XPBreakdown({ lines }: { lines?: XPBreakdownLine[] }) {
+  if (!lines || lines.length === 0) return null
+  return (
+    <div className="mt-2 space-y-1 border-t border-border pt-2">
+      {lines.map((line, index) => (
+        <div key={`${line.label}-${index}`} className="flex justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">
+            {line.label}
+            {line.detail ? <span className="block text-[11px] text-muted-foreground/75">{line.detail}</span> : null}
+          </span>
+          <span className={`font-semibold ${line.kind === 'attribute' || line.kind === 'class' ? 'text-primary' : 'text-secondary'}`}>
+            +{line.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function locationById(locationId: ExplorationLocationId) {
   return EXPLORATION_LOCATIONS.find(location => location.id === locationId) ?? EXPLORATION_LOCATIONS[0]
 }
@@ -156,8 +179,10 @@ function routePoint(fromId: ExplorationLocationId, toId: ExplorationLocationId, 
   }
 }
 
+type DetailTab = 'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'
+
 export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onRenameCharacter, onDeleteCharacter, onOpenRitual }: CharacterDetailPageProps) {
-  const [activeTab, setActiveTab] = useState<'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'history'>('stats')
+  const [activeTab, setActiveTab] = useState<DetailTab>('stats')
   const [tooltipAttr, setTooltipAttr] = useState<string | null>(null)
   const [editingMarker, setEditingMarker] = useState(false)
   const [markerValue, setMarkerValue] = useState(String(character.journeyMarker))
@@ -180,6 +205,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const maxBattleLoss = maxBattleDamageOnDefeat(character)
   const checkinReady = canCheckin(character, new Date(nowTick))
   const checkinRemaining = checkinTimeRemaining(character, new Date(nowTick))
+  const dailyMissionState = getDailyMissions(character)
   const currentExploration = character.exploration ?? {
     currentLocationId: CASTLE_LOCATION_ID,
     completedLocationIds: [],
@@ -187,6 +213,8 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const exploration = explorationProgress(character, new Date(nowTick))
   const selectedLocation = selectedLocationId ? locationById(selectedLocationId) : null
   const activeJourney = currentExploration.activeJourney
+  const explorationLevelXPPreview = character.level * 5
+  const explorationWisdomXPPreview = Math.round(effectiveAttributes.sabedoria * 1.5)
   const markerPosition = activeJourney
     ? routePoint(activeJourney.fromLocationId, activeJourney.toLocationId, exploration.progressPct)
     : locationById(currentExploration.currentLocationId)
@@ -203,6 +231,33 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     if (spentPct >= 100) return 'text-destructive'
     if (spentPct >= 80) return 'text-secondary'
     return 'text-primary'
+  }
+
+  const completeMissionIfActive = (base: Character, missionId: DailyMissionId) => {
+    return completeDailyMission(base, missionId)
+  }
+
+  const handleTabChange = (tab: DetailTab) => {
+    setActiveTab(tab)
+    if (tab !== 'inventory') return
+    const mission = completeMissionIfActive(character, 'inspect_inventory')
+    if (mission.awardedXP > 0) {
+      onUpdateCharacter(mission.character)
+      setActionMessage(mission.message ?? `Missão diária concluída. +${mission.awardedXP} XP.`)
+    }
+  }
+
+  const handleDailyMissionClick = (missionId: DailyMissionId) => {
+    const mission = dailyMissionState.missions.find(item => item.id === missionId)
+    if (!mission) return
+    if (mission.target === 'ritual') {
+      onOpenRitual()
+      return
+    }
+    if (mission.target === 'checkin') handleTabChange('checkin')
+    if (mission.target === 'battle') handleTabChange('battle')
+    if (mission.target === 'inventory') handleTabChange('inventory')
+    if (mission.target === 'shop') handleTabChange('shop')
   }
 
   // Distribute attribute point
@@ -258,11 +313,15 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
   const handleCheckin = () => {
     const result = performCheckin(character)
-    onUpdateCharacter(result.character)
+    const mission = result.ok ? completeMissionIfActive(result.character, 'checkin') : { character: result.character, awardedXP: 0 }
+    onUpdateCharacter(mission.character)
     setLastCheckin(result)
     setLastBattle(null)
     setBattleScreenOpen(false)
-    setActionMessage(result.reward ? `${result.message} ${rewardTitle(result.reward)}: ${result.reward.label}.` : result.message)
+    setActionMessage([
+      result.reward ? `${result.message} ${rewardTitle(result.reward)}: ${result.reward.label}.` : result.message,
+      mission.awardedXP > 0 ? mission.message : '',
+    ].filter(Boolean).join(' '))
     setNowTick(Date.now())
   }
 
@@ -288,7 +347,8 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
   const handleBattle = () => {
     const result = performBattle(character)
-    onUpdateCharacter(result.character)
+    const mission = result.rounds.length > 0 ? completeMissionIfActive(result.character, 'battle') : { character: result.character, awardedXP: 0 }
+    onUpdateCharacter(mission.character)
     setLastBattle(result)
     setVisibleBattleRounds(0)
     setBattleScreenOpen(result.rounds.length > 0)
@@ -298,13 +358,18 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
       result.itemGained ? `Item: ${CONSUMABLE_ITEMS[result.itemGained].name}` : '',
       result.damageTaken > 0 ? `-${result.damageTaken} vida` : '',
     ].filter(Boolean).join(' · ')
-    setActionMessage(`${result.message}${loot ? ` ${loot}` : ''}`)
+    setActionMessage([
+      `${result.message}${loot ? ` ${loot}` : ''}`,
+      mission.awardedXP > 0 ? mission.message : '',
+    ].filter(Boolean).join(' '))
   }
 
   const handleBuyConsumable = (itemId: ConsumableItemId) => {
     const result = buyConsumable(character, itemId)
-    onUpdateCharacter(result.character)
-    setActionMessage(result.message)
+    const bought = result.character !== character
+    const mission = bought ? completeMissionIfActive(result.character, 'buy_shop') : { character: result.character, awardedXP: 0 }
+    onUpdateCharacter(mission.character)
+    setActionMessage([result.message, mission.awardedXP > 0 ? mission.message : ''].filter(Boolean).join(' '))
     setLastBattle(null)
     setBattleScreenOpen(false)
   }
@@ -319,8 +384,10 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
   const handleBuyEquipment = (slot: EquipmentSlot) => {
     const result = buyEquipmentUpgrade(character, slot)
-    onUpdateCharacter(result.character)
-    setActionMessage(result.message)
+    const bought = result.character !== character
+    const mission = bought ? completeMissionIfActive(result.character, 'buy_shop') : { character: result.character, awardedXP: 0 }
+    onUpdateCharacter(mission.character)
+    setActionMessage([result.message, mission.awardedXP > 0 ? mission.message : ''].filter(Boolean).join(' '))
     setLastBattle(null)
     setBattleScreenOpen(false)
   }
@@ -352,10 +419,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Sua vida temporária</span>
+                  <span className="text-muted-foreground">Sua vida de batalha</span>
                   <span className="text-foreground font-semibold">{shownPlayerHp}/{lastBattle.playerBattleHpStart}</span>
                 </div>
                 <ProgressBar value={shownPlayerHp} max={lastBattle.playerBattleHpStart} colorClass={shownPlayerHp <= 0 ? 'bg-destructive' : 'bg-primary'} />
+                <p className="text-[11px] text-muted-foreground">Não é a vida real do personagem; vale só para esta batalha.</p>
               </div>
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
@@ -373,7 +441,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     {round.text}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Você {round.playerHp} HP temp · Monstro {round.monsterHp} HP
+                    Você {round.playerHp} vida de batalha · Monstro {round.monsterHp} HP
                   </p>
                 </div>
               ))}
@@ -408,6 +476,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 <div className="rounded border border-border bg-black/35 p-3 text-sm">
                   <p className="font-semibold text-foreground">XP da batalha</p>
                   <p className="text-xs text-secondary">+{lastBattle.xpGained} XP</p>
+                  <XPBreakdown lines={lastBattle.xpBreakdown} />
                 </div>
                 {lastBattle.damageTaken > 0 && (
                   <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm">
@@ -567,7 +636,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
           {tabs.map(t => (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => handleTabChange(t.key)}
               className={`shrink-0 rounded border px-3 py-2 text-xs font-semibold transition sm:text-sm ${
                 activeTab === t.key
                   ? 'border-primary/60 bg-primary/10 text-primary'
@@ -588,6 +657,74 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
         {/* Tab: Ficha */}
         {activeTab === 'stats' && (
           <div className="space-y-4">
+            {/* Missões diárias */}
+            <section className="dungeon-panel bg-card border border-primary/25 rounded-lg p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide flex items-center gap-2">
+                    <ScrollText className="size-4 text-primary" aria-hidden="true" />
+                    Contratos Diários
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Duas tarefas simples por dia. Cada contrato concluído rende +5 XP.
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded border px-2 py-1 text-xs font-bold ${
+                  dailyMissionState.allDone
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border bg-black/35 text-muted-foreground'
+                }`}>
+                  {dailyMissionState.allDone ? 'Tudo feito' : `${dailyMissionState.missions.filter(mission => mission.completed).length}/2`}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {dailyMissionState.missions.map(mission => (
+                  <button
+                    key={mission.id}
+                    type="button"
+                    onClick={() => handleDailyMissionClick(mission.id)}
+                    className={`w-full rounded border p-3 text-left transition ${
+                      mission.completed
+                        ? 'border-primary/35 bg-primary/10'
+                        : 'border-border bg-black/35 hover:border-primary/35 hover:bg-primary/5'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {mission.completed ? (
+                        <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
+                      ) : (
+                        <Circle className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className={`font-semibold ${mission.completed ? 'text-primary line-through decoration-primary/70' : 'text-foreground'}`}>
+                            {mission.title}
+                          </p>
+                          <span className="rounded border border-secondary/30 bg-secondary/10 px-2 py-0.5 text-xs font-bold text-secondary">
+                            +{mission.xp} XP
+                          </span>
+                        </div>
+                        <p className={`mt-1 text-xs ${mission.completed ? 'text-muted-foreground/75 line-through decoration-muted-foreground/50' : 'text-muted-foreground'}`}>
+                          {mission.description}
+                        </p>
+                        {!mission.completed && (
+                          <p className="mt-2 text-xs font-semibold text-primary">{mission.actionLabel}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {dailyMissionState.allDone && (
+                <div className="rounded border border-primary/30 bg-primary/10 p-3 text-sm">
+                  <p className="font-semibold text-primary">Todas as missões diárias foram concluídas.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Os contratos do dia foram selados. Amanhã a guilda prepara novos desafios.</p>
+                </div>
+              )}
+            </section>
+
             {/* Ciclo atual */}
             <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
               <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Ciclo Atual</h3>
@@ -719,7 +856,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   {checkinReady ? 'Pronta' : formatDuration(checkinRemaining)}
                 </span>
               </div>
-              <Button onClick={() => setActiveTab('checkin')} variant="outline" className="w-full">
+              <Button onClick={() => handleTabChange('checkin')} variant="outline" className="w-full">
                 Abrir Ronda
               </Button>
             </section>
@@ -827,14 +964,15 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     className="size-20 rounded border border-primary/35 object-cover"
                     style={{ imageRendering: 'pixelated' }}
                   />
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-widest text-primary">Recompensa da ronda</p>
-                    <h4 className="font-bold text-foreground">{rewardTitle(lastCheckin.reward)}</h4>
-                    <p className="text-sm text-secondary font-semibold">{lastCheckin.reward.label}</p>
-                  </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-primary">Recompensa da ronda</p>
+                  <h4 className="font-bold text-foreground">{rewardTitle(lastCheckin.reward)}</h4>
+                  <p className="text-sm text-secondary font-semibold">{lastCheckin.reward.label}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">{lastCheckin.message}</p>
-              </section>
+              </div>
+              <XPBreakdown lines={lastCheckin.reward.xpBreakdown} />
+              <p className="text-xs text-muted-foreground">{lastCheckin.message}</p>
+            </section>
             )}
           </div>
         )}
@@ -1056,7 +1194,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                             <div className="rounded border border-border bg-black/35 p-2">
                               <img src={XP_REWARD_IMAGE_SRC} alt="" className="mx-auto mb-1 size-10 rounded object-cover" style={{ imageRendering: 'pixelated' }} />
                               <p className="text-muted-foreground">XP</p>
-                              <p className="font-bold text-secondary">+{Math.round(selectedLocation.xpBase + character.level * 5)}</p>
+                              <p className="font-bold text-secondary">+{Math.round(selectedLocation.xpBase + explorationLevelXPPreview + explorationWisdomXPPreview)}</p>
                             </div>
                             <div className="rounded border border-border bg-black/35 p-2">
                               <p className="mb-1 text-muted-foreground">Dias</p>
@@ -1072,6 +1210,23 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                               <p className="text-muted-foreground">Drop</p>
                               <p className="font-bold text-primary">{Math.round(selectedLocation.dropChance * 100)}%</p>
                             </div>
+                          </div>
+
+                          <div className="rounded border border-border bg-black/35 p-3 text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">XP do local</span>
+                              <span className="font-semibold text-secondary">+{selectedLocation.xpBase}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Bônus de nível ({character.level} x 5)</span>
+                              <span className="font-semibold text-primary">+{explorationLevelXPPreview}</span>
+                            </div>
+                            {explorationWisdomXPPreview > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Bônus de Sabedoria ({effectiveAttributes.sabedoria})</span>
+                                <span className="font-semibold text-primary">+{explorationWisdomXPPreview}</span>
+                              </div>
+                            )}
                           </div>
 
                           <p className="rounded border border-primary/30 bg-primary/10 p-3 text-xs text-muted-foreground">
@@ -1115,6 +1270,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     </p>
                   </div>
                 </div>
+                <XPBreakdown lines={currentExploration.lastReward.xpBreakdown} />
               </section>
             )}
           </div>

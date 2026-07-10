@@ -1,4 +1,4 @@
-const CACHE = 'reino-dos-gastos-v3'
+const CACHE = 'reino-dos-gastos-v4'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -10,6 +10,7 @@ self.addEventListener('install', (event) => {
         '/icon-512.png',
         '/icon-maskable-512.png',
         '/exploration/reino-map.png',
+        '/items/level-up.png',
       ])
     )
   )

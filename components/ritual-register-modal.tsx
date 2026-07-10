@@ -11,6 +11,7 @@ import {
   calcEffectiveAttributes,
   xpForLevel,
 } from '@/lib/types'
+import { completeDailyMission } from '@/lib/game-engine'
 
 interface RitualRegisterModalProps {
   character: Character
@@ -42,6 +43,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
 
   const bonusXP = xpBreakdown.bonus
   const totalXP = Math.round((xpBreakdown.base + xpBreakdown.daily + bonusXP) * comboMult)
+  const comboBonusXP = Math.max(0, totalXP - (xpBreakdown.base + xpBreakdown.daily + bonusXP))
 
   const savedToday = Math.max(0, quota - amountNum)
   const overQuota = amountNum > quota
@@ -94,7 +96,8 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
         attributePoints: newAttrPoints,
       }
 
-      onConfirm(updated)
+      const missionResult = completeDailyMission(updated, 'ritual_register')
+      onConfirm(missionResult.character)
       setConfirmed(true)
     } else {
       // ── NEW REGISTRATION ─────────────────────────────────────────
@@ -131,7 +134,8 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
         bestCombo: newBestCombo,
       }
 
-      onConfirm(updated)
+      const missionResult = completeDailyMission(updated, 'ritual_register')
+      onConfirm(missionResult.character)
       setConfirmed(true)
     }
   }
@@ -179,20 +183,46 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
                   <span className="text-muted-foreground">XP base (registro)</span>
                   <span className="font-semibold text-foreground">+{xpBreakdown.base}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">XP missão diária</span>
-                  <span className="font-semibold text-foreground">+{xpBreakdown.daily}</span>
-                </div>
+                {xpBreakdown.sabedoriaBonus > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">inclui Sabedoria ({effectiveAttributes.sabedoria} x 5%)</span>
+                    <span className="font-semibold text-primary">+{xpBreakdown.sabedoriaBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.classBaseBonus > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">inclui bônus da classe {classDef.name}</span>
+                    <span className="font-semibold text-primary">+{xpBreakdown.classBaseBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.daily > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">XP missão diária</span>
+                    <span className="font-semibold text-foreground">+{xpBreakdown.daily}</span>
+                  </div>
+                )}
                 {bonusXP > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">XP bônus (Ouro Preservado do Dia)</span>
                     <span className="font-semibold text-secondary">+{bonusXP}</span>
                   </div>
                 )}
+                {xpBreakdown.disciplinaBonus > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">inclui Disciplina ({effectiveAttributes.disciplina} x 10%)</span>
+                    <span className="font-semibold text-primary">+{xpBreakdown.disciplinaBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.classSavedBonus > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">inclui bônus da classe {classDef.name}</span>
+                    <span className="font-semibold text-primary">+{xpBreakdown.classSavedBonus}</span>
+                  </div>
+                )}
                 {comboMult > 1 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Combo de Disciplina ({Math.round((comboMult - 1) * 100)}% extra)</span>
-                    <span className="font-semibold text-primary">x{comboMult.toFixed(2)}</span>
+                    <span className="font-semibold text-primary">+{comboBonusXP}</span>
                   </div>
                 )}
                 <div className="border-t border-border pt-2 flex justify-between font-bold">
@@ -284,10 +314,24 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
                   <span>XP base (registro)</span>
                   <span>+{xpBreakdown.base}</span>
                 </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>XP missão diária</span>
-                  <span>+{xpBreakdown.daily}</span>
-                </div>
+                {xpBreakdown.sabedoriaBonus > 0 && (
+                  <div className="flex justify-between text-xs text-primary">
+                    <span>Sabedoria ({effectiveAttributes.sabedoria} x 5%)</span>
+                    <span>+{xpBreakdown.sabedoriaBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.classBaseBonus > 0 && (
+                  <div className="flex justify-between text-xs text-primary">
+                    <span>Bônus da classe {classDef.name}</span>
+                    <span>+{xpBreakdown.classBaseBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.daily > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>XP missão diária</span>
+                    <span>+{xpBreakdown.daily}</span>
+                  </div>
+                )}
                 {xpBreakdown.bonus > 0 ? (
                   <div className="flex justify-between text-secondary">
                     <span>Ouro Preservado do Dia</span>
@@ -296,10 +340,22 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
                 ) : overQuota ? (
                   <p className="text-xs text-muted-foreground italic">Acima da Cota de Jornada — sem bônus de economia.</p>
                 ) : null}
+                {xpBreakdown.disciplinaBonus > 0 && (
+                  <div className="flex justify-between text-xs text-primary">
+                    <span>Disciplina ({effectiveAttributes.disciplina} x 10%)</span>
+                    <span>+{xpBreakdown.disciplinaBonus}</span>
+                  </div>
+                )}
+                {xpBreakdown.classSavedBonus > 0 && (
+                  <div className="flex justify-between text-xs text-primary">
+                    <span>Bônus da classe {classDef.name}</span>
+                    <span>+{xpBreakdown.classSavedBonus}</span>
+                  </div>
+                )}
                 {comboMult > 1 && (
                   <div className="flex justify-between text-primary">
                     <span>Combo de Disciplina ({character.combo} dias)</span>
-                    <span>x{comboMult.toFixed(2)}</span>
+                    <span>+{comboBonusXP}</span>
                   </div>
                 )}
                 <div className="border-t border-border pt-1 flex justify-between font-bold text-foreground">

@@ -7,6 +7,7 @@ import {
   CLASSES,
   calcOuroConsumido,
   calcDaysInCycle,
+  calcEffectiveAttributes,
 } from '@/lib/types'
 import { calcBossResult, startNewCycle } from '@/lib/game-engine'
 
@@ -38,7 +39,22 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
   const resultInfo = RESULT_LABELS[result]
   const daysTotal = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysRegistered = character.dailyRecords.filter(r => r.registered).length
-  const cycleXP = character.dailyRecords.reduce((s, r) => s + r.xpGained, 0)
+  const recordXP = character.dailyRecords.reduce((s, r) => s + r.xpGained, 0)
+  const journeyMarkerXP = character.journeyMarkerXpGranted ? 20 : 0
+  const cycleXP = recordXP + journeyMarkerXP
+  const underLimit = ouroConsumido < character.maxTreasure
+  const pctBelow = character.maxTreasure > 0 ? (character.maxTreasure - ouroConsumido) / character.maxTreasure : 0
+  const attrs = calcEffectiveAttributes(character)
+  let bossMult = 1
+  if (underLimit) {
+    if (pctBelow > 0.2) bossMult = 1.5
+    else if (pctBelow > 0.1) bossMult = 1.35
+    else if (pctBelow > 0.05) bossMult = 1.2
+    else bossMult = 1.1
+  }
+  const resultBonus = underLimit ? Math.round(cycleXP * (bossMult - 1)) : 0
+  const prosperityBonus = underLimit ? Math.max(0, Math.round(cycleXP * (bossMult - 1) * (1 + attrs.prosperidade * 0.05)) - resultBonus) : 0
+  const classBossBonus = Math.max(0, xpBonus - resultBonus - prosperityBonus)
 
   const handleStartNewCycle = () => {
     const updated = startNewCycle(character, {
@@ -96,10 +112,36 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
                 <span className="text-muted-foreground">XP do ciclo</span>
                 <span className="font-semibold text-secondary">+{cycleXP} XP</span>
               </div>
+              {journeyMarkerXP > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">inclui Marco Inicial da Jornada</span>
+                  <span className="font-semibold text-primary">+{journeyMarkerXP}</span>
+                </div>
+              )}
               {xpBonus > 0 && (
-                <div className="flex justify-between border-t border-border pt-2">
-                  <span className="text-muted-foreground">Bônus do Boss Final</span>
-                  <span className="font-bold text-secondary">+{xpBonus} XP</span>
+                <div className="border-t border-border pt-2 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Bônus do Boss Final</span>
+                    <span className="font-bold text-secondary">+{xpBonus} XP</span>
+                  </div>
+                  {resultBonus > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Resultado do ciclo ({Math.round((bossMult - 1) * 100)}%)</span>
+                      <span className="font-semibold text-primary">+{resultBonus}</span>
+                    </div>
+                  )}
+                  {prosperityBonus > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Prosperidade ({attrs.prosperidade} x 5%)</span>
+                      <span className="font-semibold text-primary">+{prosperityBonus}</span>
+                    </div>
+                  )}
+                  {classBossBonus > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Bônus da classe {classDef.name}</span>
+                      <span className="font-semibold text-primary">+{classBossBonus}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
