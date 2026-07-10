@@ -160,6 +160,7 @@ function eventLogColor(type: string): string {
 
 function XPBreakdown({ lines }: { lines?: XPBreakdownLine[] }) {
   if (!lines || lines.length === 0) return null
+  const total = lines.reduce((sum, line) => sum + line.value, 0)
   return (
     <div className="mt-2 space-y-1 border-t border-border pt-2">
       {lines.map((line, index) => (
@@ -173,6 +174,10 @@ function XPBreakdown({ lines }: { lines?: XPBreakdownLine[] }) {
           </span>
         </div>
       ))}
+      <div className="flex justify-between border-t border-border pt-1 text-xs font-bold">
+        <span className="text-foreground">Total</span>
+        <span className="text-secondary">+{total} XP</span>
+      </div>
     </div>
   )
 }
@@ -1043,12 +1048,17 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Registros Recentes</h3>
                 <div className="space-y-2">
                   {[...character.dailyRecords].reverse().slice(0, 5).map((record, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">{new Date(record.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
-                      <span className="font-semibold text-foreground">
-                        R$ {record.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                      <span className="text-xs text-secondary font-medium">+{record.xpGained} XP</span>
+                    <div key={i} className="rounded border border-border bg-black/20 p-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{new Date(record.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                        <span className="font-semibold text-foreground">
+                          R$ {record.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-xs text-secondary font-medium">+{record.xpGained} XP</span>
+                      </div>
+                      {record.description && (
+                        <p className="mt-1 text-xs text-muted-foreground">{record.description}</p>
+                      )}
                     </div>
                   ))}
                 </div>

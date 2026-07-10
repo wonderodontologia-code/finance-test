@@ -53,8 +53,10 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
     else bossMult = 1.1
   }
   const resultBonus = underLimit ? Math.round(cycleXP * (bossMult - 1)) : 0
-  const prosperityBonus = underLimit ? Math.max(0, Math.round(cycleXP * (bossMult - 1) * (1 + attrs.prosperidade * 0.05)) - resultBonus) : 0
-  const classBossBonus = Math.max(0, xpBonus - resultBonus - prosperityBonus)
+  const afterProsperityBonus = underLimit ? Math.round(cycleXP * (bossMult - 1) * (1 + attrs.prosperidade * 0.05)) : 0
+  const prosperityBonus = Math.max(0, afterProsperityBonus - resultBonus)
+  const classBossBonus = Math.max(0, xpBonus - afterProsperityBonus)
+  const totalCampaignXP = cycleXP + xpBonus
 
   const handleStartNewCycle = () => {
     const updated = startNewCycle(character, {
@@ -108,42 +110,52 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
                 <span className="text-muted-foreground">Melhor Combo</span>
                 <span className="font-semibold">{character.bestCombo} dias</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">XP do ciclo</span>
-                <span className="font-semibold text-secondary">+{cycleXP} XP</span>
-              </div>
-              {journeyMarkerXP > 0 && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">inclui Marco Inicial da Jornada</span>
-                  <span className="font-semibold text-primary">+{journeyMarkerXP}</span>
+              <div className="border-t border-border pt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">XP dos registros</span>
+                  <span className="font-semibold text-secondary">+{recordXP} XP</span>
                 </div>
-              )}
+                {journeyMarkerXP > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Marco Inicial da Jornada</span>
+                    <span className="font-semibold text-primary">+{journeyMarkerXP}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold">
+                  <span className="text-foreground">Total antes do Boss</span>
+                  <span className="text-secondary">+{cycleXP} XP</span>
+                </div>
+              </div>
               {xpBonus > 0 && (
                 <div className="border-t border-border pt-2 space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Bônus do Boss Final</span>
-                    <span className="font-bold text-secondary">+{xpBonus} XP</span>
-                  </div>
                   {resultBonus > 0 && (
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between">
                       <span className="text-muted-foreground">Resultado do ciclo ({Math.round((bossMult - 1) * 100)}%)</span>
                       <span className="font-semibold text-primary">+{resultBonus}</span>
                     </div>
                   )}
                   {prosperityBonus > 0 && (
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between">
                       <span className="text-muted-foreground">Prosperidade ({attrs.prosperidade} x 5%)</span>
                       <span className="font-semibold text-primary">+{prosperityBonus}</span>
                     </div>
                   )}
                   {classBossBonus > 0 && (
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between">
                       <span className="text-muted-foreground">Bônus da classe {classDef.name}</span>
                       <span className="font-semibold text-primary">+{classBossBonus}</span>
                     </div>
                   )}
+                  <div className="flex justify-between border-t border-border pt-1 font-bold">
+                    <span className="text-foreground">Bônus do Boss Final</span>
+                    <span className="text-secondary">+{xpBonus} XP</span>
+                  </div>
                 </div>
               )}
+              <div className="border-t border-border pt-2 flex justify-between font-bold">
+                <span className="text-foreground">XP total da campanha</span>
+                <span className="text-secondary">+{totalCampaignXP} XP</span>
+              </div>
             </div>
           </section>
 

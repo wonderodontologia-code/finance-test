@@ -144,6 +144,7 @@ export interface DailyRecord {
   amount: number
   xpGained: number
   registered: boolean
+  description?: string
 }
 
 export interface DailyMissionProgress {

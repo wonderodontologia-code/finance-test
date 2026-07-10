@@ -11,7 +11,7 @@ import {
   calcEffectiveAttributes,
   xpForLevel,
 } from '@/lib/types'
-import { completeDailyMission } from '@/lib/game-engine'
+import { DAILY_MISSION_XP, completeDailyMission } from '@/lib/game-engine'
 
 interface RitualRegisterModalProps {
   character: Character
@@ -24,7 +24,9 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
   const existingRecord = character.dailyRecords.find(r => r.date === today) ?? null
   const isEditing = existingRecord !== null
 
+  const [entryMode, setEntryMode] = useState<'daily' | 'total'>('daily')
   const [amount, setAmount] = useState(isEditing ? String(existingRecord!.amount) : '')
+  const [description, setDescription] = useState(existingRecord?.description ?? '')
   const [confirmed, setConfirmed] = useState(false)
 
   const classDef = CLASSES.find(c => c.id === character.class)!
@@ -32,30 +34,61 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
   const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, daysInCycle)
 
-  const amountNum = amount === '' ? 0 : Number(amount)
-  const xpBreakdown = calcRegistrationXP(amountNum, quota, effectiveAttributes, classDef)
+  const previousTotal = character.journeyMarker + character.dailyRecords.reduce(
+    (sum, record) => record.date === today ? sum : sum + record.amount,
+    0
+  )
+  const enteredAmount = amount === '' ? 0 : Number(amount)
+  const calculatedDailyAmount = entryMode === 'total' ? enteredAmount - previousTotal : enteredAmount
+  const amountNum = Number.isFinite(calculatedDailyAmount) ? calculatedDailyAmount : 0
+  const validAmount = amount !== '' && Number.isFinite(enteredAmount) && amountNum >= 0
+  const xpBreakdown = calcRegistrationXP(validAmount ? amountNum : 0, quota, effectiveAttributes, classDef)
 
-  // Combo multiplier — in edit mode the combo was already incremented today, so use current value
+  const comboForXP = isEditing ? character.combo : character.combo + 1
   const comboMult =
-    character.combo >= 14 ? 1.15 :
-    character.combo >= 7  ? 1.10 :
-    character.combo >= 3  ? 1.05 : 1.0
+    comboForXP >= 14 ? 1.15 :
+    comboForXP >= 7  ? 1.10 :
+    comboForXP >= 3  ? 1.05 : 1.0
 
-  const bonusXP = xpBreakdown.bonus
-  const totalXP = Math.round((xpBreakdown.base + xpBreakdown.daily + bonusXP) * comboMult)
-  const comboBonusXP = Math.max(0, totalXP - (xpBreakdown.base + xpBreakdown.daily + bonusXP))
+  const ritualXPBeforeCombo = xpBreakdown.base + xpBreakdown.bonus
+  const totalXP = Math.round(ritualXPBeforeCombo * comboMult)
+  const comboBonusXP = Math.max(0, totalXP - ritualXPBeforeCombo)
+  const dailyMissionCompleted = character.dailyMissions?.date === today && character.dailyMissions.completedIds.includes('ritual_register')
+  const dailyMissionXPToAward = dailyMissionCompleted ? 0 : DAILY_MISSION_XP
+  const trimmedDescription = description.trim()
+  const descriptionChanged = (existingRecord?.description ?? '') !== trimmedDescription
+  const recordChanged = !isEditing || existingRecord!.amount !== amountNum || descriptionChanged
+
+  const xpLines = [
+    { label: 'XP base do registro', value: xpBreakdown.baseRaw, tone: 'muted' },
+    { label: 'Sabedoria (' + effectiveAttributes.sabedoria + ' x 5%)', value: xpBreakdown.sabedoriaBonus, tone: 'primary' },
+    { label: 'Bônus da classe ' + classDef.name, value: xpBreakdown.classBaseBonus, tone: 'primary' },
+    { label: 'Ouro Preservado do Dia', value: xpBreakdown.savedBonusBase, tone: 'secondary' },
+    { label: 'Disciplina (' + effectiveAttributes.disciplina + ' x 10%)', value: xpBreakdown.disciplinaBonus, tone: 'primary' },
+    { label: 'Bônus de economia da classe ' + classDef.name, value: xpBreakdown.classSavedBonus, tone: 'primary' },
+    { label: 'Combo de Disciplina (+' + Math.round((comboMult - 1) * 100) + '%)', value: comboBonusXP, tone: 'primary' },
+  ].filter(line => line.value > 0)
 
   const savedToday = Math.max(0, quota - amountNum)
   const overQuota = amountNum > quota
 
+  const switchEntryMode = (mode: 'daily' | 'total') => {
+    if (mode === entryMode) return
+    setEntryMode(mode)
+    if (amount === '' || !Number.isFinite(enteredAmount)) return
+    const nextAmount = mode === 'total' ? previousTotal + amountNum : amountNum
+    setAmount(String(Math.max(0, Number(nextAmount.toFixed(2)))))
+  }
+
   const handleConfirm = () => {
-    if (amount === '') return
+    if (!validAmount) return
 
     const updatedRecord = {
       date: today,
       amount: amountNum,
       xpGained: totalXP,
       registered: true,
+      description: trimmedDescription || undefined,
     }
 
     if (isEditing) {
@@ -179,55 +212,28 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
               </>
             ) : (
               <>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">XP base (registro)</span>
-                  <span className="font-semibold text-foreground">+{xpBreakdown.base}</span>
+                {xpLines.map((line) => (
+                  <div key={line.label} className="flex justify-between">
+                    <span className="text-muted-foreground">{line.label}</span>
+                    <span className={line.tone === 'secondary' ? 'font-semibold text-secondary' : line.tone === 'primary' ? 'font-semibold text-primary' : 'font-semibold text-foreground'}>+{line.value}</span>
+                  </div>
+                ))}
+                {!xpBreakdown.savedBonusBase && overQuota && (
+                  <p className="text-xs text-muted-foreground italic">Acima da Cota de Jornada — sem bônus de economia.</p>
+                )}
+                <div className="border-t border-border pt-2 flex justify-between font-bold">
+                  <span className="text-foreground">XP do registro</span>
+                  <span className="text-secondary">+{totalXP} XP</span>
                 </div>
-                {xpBreakdown.sabedoriaBonus > 0 && (
+                {dailyMissionXPToAward > 0 && (
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">inclui Sabedoria ({effectiveAttributes.sabedoria} x 5%)</span>
-                    <span className="font-semibold text-primary">+{xpBreakdown.sabedoriaBonus}</span>
-                  </div>
-                )}
-                {xpBreakdown.classBaseBonus > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">inclui bônus da classe {classDef.name}</span>
-                    <span className="font-semibold text-primary">+{xpBreakdown.classBaseBonus}</span>
-                  </div>
-                )}
-                {xpBreakdown.daily > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">XP missão diária</span>
-                    <span className="font-semibold text-foreground">+{xpBreakdown.daily}</span>
-                  </div>
-                )}
-                {bonusXP > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">XP bônus (Ouro Preservado do Dia)</span>
-                    <span className="font-semibold text-secondary">+{bonusXP}</span>
-                  </div>
-                )}
-                {xpBreakdown.disciplinaBonus > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">inclui Disciplina ({effectiveAttributes.disciplina} x 10%)</span>
-                    <span className="font-semibold text-primary">+{xpBreakdown.disciplinaBonus}</span>
-                  </div>
-                )}
-                {xpBreakdown.classSavedBonus > 0 && (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">inclui bônus da classe {classDef.name}</span>
-                    <span className="font-semibold text-primary">+{xpBreakdown.classSavedBonus}</span>
-                  </div>
-                )}
-                {comboMult > 1 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Combo de Disciplina ({Math.round((comboMult - 1) * 100)}% extra)</span>
-                    <span className="font-semibold text-primary">+{comboBonusXP}</span>
+                    <span className="text-muted-foreground">Contrato diário: Ritual de Registro</span>
+                    <span className="font-semibold text-primary">+{dailyMissionXPToAward}</span>
                   </div>
                 )}
                 <div className="border-t border-border pt-2 flex justify-between font-bold">
-                  <span className="text-foreground">Total XP</span>
-                  <span className="text-secondary">+{totalXP} XP</span>
+                  <span className="text-foreground">Total recebido agora</span>
+                  <span className="text-secondary">+{totalXP + dailyMissionXPToAward} XP</span>
                 </div>
               </>
             )}
@@ -281,11 +287,28 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
           </div>
 
           {/* Amount input */}
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-black/30 p-1 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => switchEntryMode('daily')}
+              className={'rounded-md px-3 py-2 transition ' + (entryMode === 'daily' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Gasto do dia
+            </button>
+            <button
+              type="button"
+              onClick={() => switchEntryMode('total')}
+              className={'rounded-md px-3 py-2 transition ' + (entryMode === 'total' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            >
+              Total acumulado
+            </button>
+          </div>
+
           <div>
             <label className="text-sm font-medium text-foreground block mb-1">
               {isEditing
                 ? `Valor registrado hoje (original: R$ ${existingRecord!.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
-                : 'Quanto você gastou hoje?'}
+                : entryMode === 'total' ? 'Qual é o total acumulado agora?' : 'Quanto você gastou hoje?'}
             </label>
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-muted-foreground">R$</span>
@@ -301,76 +324,72 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
               />
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Registrar R$ 0 é válido — pode ser que não tenha gastado nada hoje.
+              {entryMode === 'total'
+                ? 'Já havia R$ ' + previousTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' registrado. O gasto de hoje será a diferença.'
+                : 'Registrar R$ 0 é válido — pode ser que não tenha gastado nada hoje.'}
             </p>
+            {entryMode === 'total' && amount !== '' && (
+              <p className={'mt-1 text-xs font-semibold ' + (validAmount ? 'text-secondary' : 'text-destructive')}>
+                Diferença calculada para hoje: R$ {amountNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground block mb-1">Descrição opcional</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ex.: mercado, almoço, farmácia..."
+              maxLength={80}
+              className="w-full px-4 py-3 rounded-lg border border-border bg-input text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
           </div>
 
           {/* Live XP preview */}
           {amount !== '' && (
             <div className="bg-black/35 border border-border rounded-lg p-3 space-y-2 text-sm">
               <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Prévia do XP</p>
-              <div className="space-y-1">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>XP base (registro)</span>
-                  <span>+{xpBreakdown.base}</span>
-                </div>
-                {xpBreakdown.sabedoriaBonus > 0 && (
-                  <div className="flex justify-between text-xs text-primary">
-                    <span>Sabedoria ({effectiveAttributes.sabedoria} x 5%)</span>
-                    <span>+{xpBreakdown.sabedoriaBonus}</span>
+              {validAmount ? (
+                <>
+                  <div className="space-y-1">
+                    {xpLines.map((line) => (
+                      <div key={line.label} className={'flex justify-between ' + (line.tone === 'secondary' ? 'text-secondary' : line.tone === 'primary' ? 'text-primary' : 'text-muted-foreground')}>
+                        <span>{line.label}</span>
+                        <span>+{line.value}</span>
+                      </div>
+                    ))}
+                    {!xpBreakdown.savedBonusBase && overQuota && (
+                      <p className="text-xs text-muted-foreground italic">Acima da Cota de Jornada — sem bônus de economia.</p>
+                    )}
+                    <div className="border-t border-border pt-1 flex justify-between font-bold text-foreground">
+                      <span>XP do registro</span>
+                      <span className="text-secondary">+{totalXP} XP</span>
+                    </div>
+                    {dailyMissionXPToAward > 0 && (
+                      <div className="flex justify-between text-xs text-primary">
+                        <span>Contrato diário ao confirmar</span>
+                        <span>+{dailyMissionXPToAward}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-border pt-1 flex justify-between font-bold text-foreground">
+                      <span>Total recebido agora</span>
+                      <span className="text-secondary">+{totalXP + dailyMissionXPToAward} XP</span>
+                    </div>
                   </div>
-                )}
-                {xpBreakdown.classBaseBonus > 0 && (
-                  <div className="flex justify-between text-xs text-primary">
-                    <span>Bônus da classe {classDef.name}</span>
-                    <span>+{xpBreakdown.classBaseBonus}</span>
-                  </div>
-                )}
-                {xpBreakdown.daily > 0 && (
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>XP missão diária</span>
-                    <span>+{xpBreakdown.daily}</span>
-                  </div>
-                )}
-                {xpBreakdown.bonus > 0 ? (
-                  <div className="flex justify-between text-secondary">
-                    <span>Ouro Preservado do Dia</span>
-                    <span>+{bonusXP}</span>
-                  </div>
-                ) : overQuota ? (
-                  <p className="text-xs text-muted-foreground italic">Acima da Cota de Jornada — sem bônus de economia.</p>
-                ) : null}
-                {xpBreakdown.disciplinaBonus > 0 && (
-                  <div className="flex justify-between text-xs text-primary">
-                    <span>Disciplina ({effectiveAttributes.disciplina} x 10%)</span>
-                    <span>+{xpBreakdown.disciplinaBonus}</span>
-                  </div>
-                )}
-                {xpBreakdown.classSavedBonus > 0 && (
-                  <div className="flex justify-between text-xs text-primary">
-                    <span>Bônus da classe {classDef.name}</span>
-                    <span>+{xpBreakdown.classSavedBonus}</span>
-                  </div>
-                )}
-                {comboMult > 1 && (
-                  <div className="flex justify-between text-primary">
-                    <span>Combo de Disciplina ({character.combo} dias)</span>
-                    <span>+{comboBonusXP}</span>
-                  </div>
-                )}
-                <div className="border-t border-border pt-1 flex justify-between font-bold text-foreground">
-                  <span>Total</span>
-                  <span className="text-secondary">+{totalXP} XP</span>
-                </div>
-              </div>
 
-              {savedToday > 0 && (
-                <p className="text-xs text-muted-foreground border-t border-border pt-2">
-                  Ouro Preservado do Dia:{' '}
-                  <span className="font-semibold text-foreground">
-                    R$ {savedToday.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
-                </p>
+                  {savedToday > 0 && (
+                    <p className="text-xs text-muted-foreground border-t border-border pt-2">
+                      Ouro Preservado do Dia:{' '}
+                      <span className="font-semibold text-foreground">
+                        R$ {savedToday.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-destructive">O total acumulado informado é menor que o valor já registrado antes de hoje.</p>
               )}
             </div>
           )}
@@ -388,7 +407,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={amount === '' || Number(amount) < 0 || (isEditing && Number(amount) === existingRecord!.amount)}
+            disabled={!validAmount || !recordChanged}
             className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
           >
             {isEditing ? 'Salvar Alteração' : 'Confirmar Registro'}
