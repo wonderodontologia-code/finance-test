@@ -458,7 +458,6 @@ export function canExploreLocation(char: Character, locationId: ExplorationLocat
   if (location.id === CASTLE_LOCATION_ID) return { ok: false, reason: 'O castelo é o ponto de partida.' }
   if (current.exploration.activeJourney) return { ok: false, reason: 'Já existe uma exploração em andamento.' }
   if (current.exploration.currentLocationId !== CASTLE_LOCATION_ID) return { ok: false, reason: 'Volte ao castelo antes de explorar outro local.' }
-  if (current.exploration.completedLocationIds.includes(location.id)) return { ok: false, reason: 'Esse local já foi explorado.' }
   if (current.level < location.minLevel) return { ok: false, reason: `Requer nível ${location.minLevel}.` }
   return { ok: true }
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Home, Lock, MapPin, Search, X } from 'lucide-react'
+import { Home, Lock, MapPin, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
@@ -812,11 +812,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   <p className="text-xs font-semibold uppercase tracking-widest text-primary">Mapa do Reino</p>
                   <h3 className="font-semibold text-foreground">Explorar</h3>
                   <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                    Escolha um destino e avance com dias seguidos de Ritual de Registro. Quanto melhor o saque, mais dias de consistência a expedição exige. Cada local só pode ser explorado uma vez.
+                    Escolha um destino e avance com dias seguidos de Ritual de Registro. Quanto melhor o saque, mais dias de consistência a expedição exige. Só dá para manter uma expedição por vez; depois de voltar ao castelo, você pode explorar qualquer local disponível de novo.
                   </p>
                 </div>
                 <span className="shrink-0 rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
-                  {currentExploration.completedLocationIds.length}/{EXPLORATION_LOCATIONS.length - 1}
+                  {currentExploration.completedLocationIds.length} visitado{currentExploration.completedLocationIds.length === 1 ? '' : 's'}
                 </span>
               </div>
 
@@ -864,7 +864,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                         selected
                           ? 'border-primary bg-primary text-primary-foreground ring-2 ring-primary/40'
                           : completed
-                            ? 'border-primary/60 bg-black/75 text-primary'
+                            ? 'border-secondary/60 bg-black/75 text-secondary'
                             : locked
                               ? 'border-border bg-black/75 text-muted-foreground'
                               : inRoute
@@ -876,8 +876,6 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     >
                       {location.id === CASTLE_LOCATION_ID ? (
                         <Home className="size-3.5" aria-hidden="true" />
-                      ) : completed ? (
-                        <Check className="size-3.5" aria-hidden="true" />
                       ) : locked ? (
                         <Lock className="size-3.5" aria-hidden="true" />
                       ) : (
@@ -1002,6 +1000,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   ) : selectedLocation && (
                     <div className="mt-4 space-y-3">
                       <p className="text-sm leading-relaxed text-muted-foreground">{selectedLocation.description}</p>
+                      {currentExploration.completedLocationIds.includes(selectedLocation.id) && selectedLocation.id !== CASTLE_LOCATION_ID && (
+                        <p className="rounded border border-secondary/30 bg-secondary/10 p-3 text-xs text-muted-foreground">
+                          Este local já foi visitado antes, mas pode ser explorado novamente depois que o personagem estiver de volta ao castelo.
+                        </p>
+                      )}
                       <div className="flex items-center justify-between rounded border border-border bg-black/35 p-3 text-sm">
                         <span className="text-muted-foreground">Requisito</span>
                         <span className="font-bold text-foreground">Nível {selectedLocation.minLevel}+</span>
