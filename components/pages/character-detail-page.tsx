@@ -50,6 +50,7 @@ import {
   type CheckinResult,
   CHECKIN_ACTION_NAME,
   CHECKIN_COOLDOWN_HOURS,
+  answerKnowledgeBlock,
   answerBattleQuiz,
   completeDailyMission,
   battlesToday,
@@ -74,8 +75,10 @@ import {
   explorationProgress,
   maxBattleDamageOnDefeat,
   drawBattleQuizQuestion,
+  markBattleBossOffered,
   performBattleTurn,
   performCheckin,
+  shouldOfferBattleBoss,
   startInteractiveBattle,
   startExploration,
   syncExplorationConsistency,
@@ -359,6 +362,8 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const [advancedActionsOpen, setAdvancedActionsOpen] = useState(false)
   const [advancedActionPage, setAdvancedActionPage] = useState(0)
   const [enemyAttacksOpen, setEnemyAttacksOpen] = useState(false)
+  const [itemsOpen, setItemsOpen] = useState(false)
+  const [bossOfferCharacter, setBossOfferCharacter] = useState<Character | null>(null)
   const [lastCheckin, setLastCheckin] = useState<CheckinResult | null>(null)
   const [lootResult, setLootResult] = useState<LootResult | null>(null)
   const [selectedLocationId, setSelectedLocationId] = useState<ExplorationLocationId | null>(null)
@@ -600,6 +605,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     setAdvancedActionsOpen(false)
     setAdvancedActionPage(0)
     setEnemyAttacksOpen(false)
+    setItemsOpen(false)
     if (result.battle) {
       setActiveBattle(result.battle)
       setVisibleActiveBattleRounds(1)
@@ -612,7 +618,12 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
       const mission = result.result.rounds.length > 0 && !result.result.died
         ? completeMissionIfActive(result.character, 'battle')
         : { character: result.character, awardedXP: 0 }
-      onUpdateCharacter(mission.character, { deferLevelUp: result.result.rounds.length > 0 })
+      const bossOffer = result.result.won && !result.result.boss && shouldOfferBattleBoss(mission.character)
+      const characterAfterOffer = bossOffer ? markBattleBossOffered(mission.character) : mission.character
+      onUpdateCharacter(characterAfterOffer, { deferLevelUp: result.result.rounds.length > 0 })
+      if (bossOffer) {
+        setBossOfferCharacter(characterAfterOffer)
+      }
       setActiveBattle(result.battle)
       setPendingBattleResult(result.result)
       setLastBattle(result.result)
@@ -653,6 +664,37 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     const result = answerBattleQuiz(character, activeBattle, battleQuiz, optionIndex)
     finishBattleTurn(result)
     setBattleQuiz(null)
+  }
+
+  const handleAnswerKnowledgeBlock = (optionIndex: number) => {
+    if (!activeBattle?.pendingKnowledgeBlock) return
+    finishBattleTurn(answerKnowledgeBlock(character, activeBattle, optionIndex))
+  }
+
+  const handleAcceptBossBattle = () => {
+    if (!bossOfferCharacter) return
+    const result = startInteractiveBattle(bossOfferCharacter, new Date(nowTick), { boss: true })
+    onUpdateCharacter(result.character)
+    setBossOfferCharacter(null)
+    setLootResult(null)
+    setActionMessage(result.message)
+    setLastBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
+    setAdvancedActionsOpen(false)
+    setAdvancedActionPage(0)
+    setEnemyAttacksOpen(false)
+    setItemsOpen(false)
+    if (result.battle) {
+      setActiveBattle(result.battle)
+      setVisibleActiveBattleRounds(1)
+      setBattleScreenOpen(true)
+    }
+  }
+
+  const handleDeclineBossBattle = () => {
+    setBossOfferCharacter(null)
+    onFlushPendingLevelUp()
   }
 
   const handleBuyConsumable = (itemId: ConsumableItemId) => {
@@ -712,7 +754,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     const shownMonsterHp = currentRound?.monsterHp ?? activeBattle.monsterHpStart
     const battleAnimating = visibleActiveBattleRounds < activeBattle.rounds.length
     const battleResultReady = pendingBattleResult && !battleAnimating
-    const actionLocked = battleAnimating || Boolean(battleResultReady)
+    const actionLocked = battleAnimating || Boolean(battleResultReady) || Boolean(activeBattle.pendingKnowledgeBlock)
     const canUseSpecial = activeBattle.playerSpecial >= activeBattle.playerSpecialMax && activeBattle.playerResource >= activeBattle.classProfile.strongCost
     const techniquePageSize = 1
     const techniquePageCount = Math.max(1, Math.ceil(activeBattle.playerTechniques.length / techniquePageSize))
@@ -743,13 +785,42 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
     return (
       <div className="min-h-screen bg-background">
+        {activeBattle.pendingKnowledgeBlock && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-4 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true">
+            <div className="dungeon-panel gold-frame max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-primary/45 bg-card p-5 shadow-2xl">
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">Escudo do Conhecimento</p>
+              <h3 className="mt-1 text-xl font-black text-foreground">{activeBattle.pendingKnowledgeBlock.attackName}</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                O inimigo preparou um golpe poderoso de <span className="font-bold text-destructive">{activeBattle.pendingKnowledgeBlock.damage} dano</span>.
+                Acerte a pergunta para bloquear totalmente.
+              </p>
+              <div className="mt-4 rounded border border-border bg-black/35 p-3">
+                <p className="text-sm font-semibold text-foreground">{activeBattle.pendingKnowledgeBlock.question.prompt}</p>
+                <div className="mt-3 grid gap-2">
+                  {activeBattle.pendingKnowledgeBlock.question.options.map((option, index) => (
+                    <Button
+                      key={option}
+                      variant="outline"
+                      className="h-auto justify-start whitespace-normal px-3 py-2 text-left text-sm"
+                      onClick={() => handleAnswerKnowledgeBlock(index)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <header className="bg-black/75 border-b border-primary/25 sticky top-0 z-10 backdrop-blur">
           <div className="max-w-xl mx-auto px-3 py-2 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">Arena da Masmorra</p>
               <h1 className="font-bold text-foreground text-sm">{character.name} vs {activeBattle.monsterName}</h1>
             </div>
-            <span className="text-xs font-bold text-muted-foreground">Turno {activeBattle.turn}</span>
+            <span className={`text-xs font-bold ${activeBattle.boss ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {activeBattle.boss ? 'CHEFÃO' : `Turno ${activeBattle.turn}`}
+            </span>
           </div>
         </header>
 
@@ -780,6 +851,15 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                   <span className="text-foreground font-semibold">{shownMonsterHp}/{activeBattle.monsterHpStart}</span>
                 </div>
                 <ProgressBar value={shownMonsterHp} max={activeBattle.monsterHpStart} colorClass={shownMonsterHp <= 0 ? 'bg-destructive' : 'bg-destructive'} />
+                {activeBattle.boss && (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Escudo</span>
+                      <span className="text-foreground font-semibold">{activeBattle.bossShield}/{activeBattle.bossShieldMax}</span>
+                    </div>
+                    <ProgressBar value={activeBattle.bossShield} max={activeBattle.bossShieldMax} colorClass={activeBattle.bossShield > 0 ? 'bg-accent' : 'bg-primary'} />
+                  </>
+                )}
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Ímpeto inimigo</span>
                   <span className="text-foreground font-semibold">{activeBattle.enemyResource}/{activeBattle.enemyResourceMax}</span>
@@ -790,6 +870,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 </div>
               </div>
             </div>
+            {activeBattle.boss && (
+              <div className="mt-2 rounded border border-destructive/35 bg-destructive/10 px-2 py-1 text-[11px] text-muted-foreground">
+                Chefão: o Escudo de Patrimônio só quebra com <span className="font-bold text-primary">Especial</span>. Carregue a barra respondendo perguntas.
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setEnemyAttacksOpen(open => !open)}
@@ -869,30 +954,29 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     <span className="block text-[11px] font-normal opacity-80">Barra cheia + recurso</span>
                   </span>
                 </Button>
-                {potionItems.length > 0 ? (
-                  <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => handleBattleAction('item', potionItems[0].itemId)} className="h-auto justify-start px-3 py-2 text-left">
-                    <span>
-                      <span className="block font-bold">Poção</span>
-                      <span className="block text-[11px] font-normal text-muted-foreground">{CONSUMABLE_ITEMS[potionItems[0].itemId].name} x{potionItems[0].quantity}</span>
-                    </span>
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" disabled className="h-auto justify-start px-3 py-2 text-left opacity-50">
-                    <span>
-                      <span className="block font-bold">Poção</span>
-                      <span className="block text-[11px] font-normal text-muted-foreground">Nenhuma</span>
-                    </span>
-                  </Button>
-                )}
+                <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => setItemsOpen(open => !open)} className="h-auto justify-start px-3 py-2 text-left">
+                  <span>
+                    <span className="block font-bold">Itens</span>
+                    <span className="block text-[11px] font-normal text-muted-foreground">{potionItems.length > 0 ? `${potionItems.length} tipo(s) de poção` : 'Nenhuma poção'}</span>
+                  </span>
+                </Button>
               </div>
 
-              {potionItems.length > 1 && (
-                <div className="grid grid-cols-2 gap-2">
-                  {potionItems.slice(1).map(item => (
-                    <Button key={item.itemId} size="sm" variant="outline" disabled={actionLocked} onClick={() => handleBattleAction('item', item.itemId)}>
-                      {CONSUMABLE_ITEMS[item.itemId].name} x{item.quantity}
-                    </Button>
-                  ))}
+              {itemsOpen && (
+                <div className="rounded border border-border bg-black/25 p-2">
+                  <div className="mb-2 flex items-center justify-between text-xs">
+                    <span className="font-semibold uppercase tracking-wide text-muted-foreground">Poções</span>
+                    <span className="text-[11px] text-muted-foreground">consome item real</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {potionItems.length === 0 ? (
+                      <p className="col-span-2 text-xs text-muted-foreground">Nenhuma poção disponível.</p>
+                    ) : potionItems.map(item => (
+                      <Button key={item.itemId} size="sm" variant="outline" disabled={actionLocked} onClick={() => handleBattleAction('item', item.itemId)}>
+                        {CONSUMABLE_ITEMS[item.itemId].name} x{item.quantity}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1193,42 +1277,61 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
             result={lootResult}
             onClose={() => {
               setLootResult(null)
-              onFlushPendingLevelUp()
+              if (!bossOfferCharacter) onFlushPendingLevelUp()
             }}
           />
+        )}
+        {!lootResult && bossOfferCharacter && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-4 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true">
+            <div className="dungeon-panel gold-frame w-full max-w-md rounded-lg border border-destructive/45 bg-card p-5 shadow-2xl">
+              <p className="text-xs font-semibold uppercase tracking-widest text-destructive">Chefão encontrado</p>
+              <h3 className="mt-1 text-xl font-black text-foreground">Um guardião bloqueou a arena</h3>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Depois de tantas lutas hoje, surgiu um chefão com um <span className="font-bold text-primary">Escudo de Patrimônio</span>.
+                Ataques comuns só arranham o escudo. Para vencer, você precisa carregar e usar o <span className="font-bold text-primary">Especial</span>.
+              </p>
+              <div className="mt-4 rounded border border-destructive/30 bg-destructive/10 p-3 text-xs text-muted-foreground">
+                Essa chance aparece no máximo uma vez por dia, depois de pelo menos 3 batalhas. Aceitar não gasta carga extra da arena.
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={handleDeclineBossBattle}>Voltar ao castelo</Button>
+                <Button onClick={handleAcceptBossBattle}>Enfrentar chefão</Button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Hero card */}
         <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-5 space-y-4">
           {/* Class art */}
-          <button
+            <button
             type="button"
             onClick={() => nextClassImage && setShowNextEvolution(prev => !prev)}
             className="relative block w-full overflow-hidden rounded-lg border border-primary/35 bg-black/45 text-left"
-            aria-label={nextClassImage ? `Ver prévia da evolução ${nextClassImage.label}` : 'Arte final do personagem'}
+            aria-label={nextClassImage ? 'Ver prévia da próxima aparência' : 'Arte final do personagem'}
           >
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(214,169,51,0.16),transparent_58%)]" />
             <img
               src={currentClassImage.src}
-              alt={`${classDef.name} ${currentClassImage.label}`}
+              alt={classDef.name}
               className="relative mx-auto aspect-square w-full max-h-[360px] object-contain"
               style={{ imageRendering: 'pixelated' }}
             />
             {nextClassImage && showNextEvolution && (
               <img
                 src={nextClassImage.src}
-                alt={`${classDef.name} ${nextClassImage.label}`}
+                alt={`${classDef.name} prévia`}
                 className="absolute inset-0 mx-auto aspect-square h-full w-full object-contain opacity-55 mix-blend-screen"
                 style={{ imageRendering: 'pixelated' }}
               />
             )}
             <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2">
               <span className="rounded border border-primary/40 bg-black/70 px-2 py-1 text-xs font-bold text-primary">
-                Aparência {currentClassImage.label}
+                Aparência atual
               </span>
               {nextClassImage && (
                 <span className="rounded border border-border bg-black/70 px-2 py-1 text-xs text-muted-foreground">
-                  {showNextEvolution ? `Prévia ${nextClassImage.label}` : `Toque para ver ${nextClassImage.label}`}
+                  {showNextEvolution ? 'Prévia da próxima aparência' : 'Toque para ver próxima aparência'}
                 </span>
               )}
             </div>

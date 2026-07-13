@@ -962,6 +962,7 @@ export interface BattleResult {
   xpBreakdown?: XPBreakdownLine[]
   itemGained?: ConsumableItemId
   died?: boolean
+  boss?: boolean
 }
 
 export interface BattleRound {
@@ -1027,6 +1028,13 @@ export interface BattleQuizAnswerResult {
   result?: BattleResult
 }
 
+export interface BattleKnowledgeBlock {
+  attackName: string
+  damage: number
+  critical: boolean
+  question: BattleQuizQuestion
+}
+
 export interface ActiveBattleState {
   id: string
   monsterId: string
@@ -1035,6 +1043,8 @@ export interface ActiveBattleState {
   playerHp: number
   monsterHpStart: number
   monsterHp: number
+  bossShield: number
+  bossShieldMax: number
   playerResource: number
   playerResourceMax: number
   playerSpecial: number
@@ -1048,9 +1058,11 @@ export interface ActiveBattleState {
   enemyAttacks: BattleEnemyAttack[]
   classProfile: BattleClassCombatProfile
   rounds: BattleRound[]
+  pendingKnowledgeBlock?: BattleKnowledgeBlock
   finished?: boolean
   won?: boolean
   result?: BattleResult
+  boss?: boolean
 }
 
 export interface StartBattleResult {
@@ -1140,7 +1152,7 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
     minLevel: 5,
     maxLevel: 9,
     weight: 4,
-    hpMult: 1.08,
+    hpMult: 1.28,
     powerMult: 1.06,
     xpBonus: 7,
     goldBonus: 7,
@@ -1153,7 +1165,7 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
     minLevel: 5,
     maxLevel: 9,
     weight: 4,
-    hpMult: 1.12,
+    hpMult: 1.34,
     powerMult: 1.08,
     xpBonus: 8,
     goldBonus: 8,
@@ -1166,7 +1178,7 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
     minLevel: 5,
     maxLevel: 9,
     weight: 3,
-    hpMult: 0.98,
+    hpMult: 1.22,
     powerMult: 1.12,
     xpBonus: 9,
     goldBonus: 9,
@@ -1277,10 +1289,74 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
   },
 ]
 
+const BATTLE_BOSSES: BattleMonsterDefinition[] = [
+  {
+    id: 'baronesa_do_rotativo',
+    name: 'Baronesa do Rotativo',
+    minLevel: 1,
+    maxLevel: 9,
+    weight: 1,
+    hpMult: 1.85,
+    powerMult: 1.18,
+    xpBonus: 18,
+    goldBonus: 18,
+    missMod: -0.02,
+    critMod: 0.03,
+  },
+  {
+    id: 'senhor_da_marcacao',
+    name: 'Senhor da Marcação a Mercado',
+    minLevel: 10,
+    maxLevel: 19,
+    weight: 1,
+    hpMult: 2.05,
+    powerMult: 1.26,
+    xpBonus: 28,
+    goldBonus: 28,
+    missMod: -0.03,
+    critMod: 0.05,
+  },
+  {
+    id: 'imperador_da_alavancagem',
+    name: 'Imperador da Alavancagem',
+    minLevel: 20,
+    weight: 1,
+    hpMult: 2.25,
+    powerMult: 1.34,
+    xpBonus: 40,
+    goldBonus: 40,
+    missMod: -0.04,
+    critMod: 0.07,
+  },
+]
+
 function chooseBattleMonster(char: Character, battleNumber: number): BattleMonsterDefinition {
   const available = BATTLE_MONSTERS.filter(monster => char.level >= monster.minLevel && (!monster.maxLevel || char.level <= monster.maxLevel))
   const weighted = available.flatMap(monster => Array.from({ length: monster.weight + battleNumber }, () => monster))
   return weighted[Math.floor(Math.random() * weighted.length)] ?? BATTLE_MONSTERS[0]
+}
+
+function chooseBattleBoss(char: Character): BattleMonsterDefinition {
+  return BATTLE_BOSSES.find(boss => char.level >= boss.minLevel && (!boss.maxLevel || char.level <= boss.maxLevel)) ?? BATTLE_BOSSES[0]
+}
+
+export function shouldOfferBattleBoss(char: Character): boolean {
+  const current = normalizeCharacter(char)
+  const today = todayISO()
+  if (current.battleBoss?.lastOfferedDate === today) return false
+  if (battlesToday(current) < 3) return false
+  return Math.random() < 0.45
+}
+
+export function markBattleBossOffered(char: Character): Character {
+  const current = normalizeCharacter(char)
+  return {
+    ...current,
+    battleBoss: {
+      ...current.battleBoss,
+      lastOfferedDate: todayISO(),
+    },
+  }
 }
 
 export const BATTLE_MAX_CHARGES = 5
@@ -2000,22 +2076,22 @@ export function getBattleClassProfile(char: Character): BattleClassCombatProfile
 export function getBattlePlayerTechniques(char: Character): BattlePlayerTechnique[] {
   if (char.class === 'mago') {
     return [
-      { id: 'mago_n5', name: 'Selo do Fluxo de Caixa', description: 'Golpe arcano mais forte. Bom quando a Mana está sobrando.', minLevel: 5, resourceCost: 18, damageMult: 2.05, missMod: 0.04, critMod: 0.02 },
-      { id: 'mago_n10', name: 'Tempestade de Planilhas', description: 'Dano alto, custo alto e boa chance crítica.', minLevel: 10, resourceCost: 26, damageMult: 2.7, missMod: 0.06, critMod: 0.04 },
-      { id: 'mago_n15', name: 'Balanço Final', description: 'Técnica pesada para encerrar a luta.', minLevel: 15, resourceCost: 36, damageMult: 3.45, missMod: 0.08, critMod: 0.06 },
+      { id: 'mago_n5', name: 'Selo do Fluxo de Caixa', description: 'Golpe arcano mais forte. Bom quando a Mana está sobrando.', minLevel: 5, resourceCost: 18, damageMult: 1.45, missMod: 0.04, critMod: 0.02 },
+      { id: 'mago_n10', name: 'Tempestade de Planilhas', description: 'Dano alto, custo alto e boa chance crítica.', minLevel: 10, resourceCost: 28, damageMult: 2.05, missMod: 0.06, critMod: 0.04 },
+      { id: 'mago_n15', name: 'Balanço Final', description: 'Técnica pesada para encerrar a luta.', minLevel: 15, resourceCost: 40, damageMult: 2.75, missMod: 0.08, critMod: 0.06 },
     ]
   }
   if (char.class === 'ladino') {
     return [
-      { id: 'ladino_n5', name: 'Finta da Economia', description: 'Dano forte com boa chance crítica.', minLevel: 5, resourceCost: 16, damageMult: 1.95, missMod: 0.03, critMod: 0.05 },
-      { id: 'ladino_n10', name: 'Combo da Margem', description: 'Sequência agressiva para acelerar vitórias.', minLevel: 10, resourceCost: 24, damageMult: 2.55, missMod: 0.05, critMod: 0.08 },
-      { id: 'ladino_n15', name: 'Roubo do Rotativo', description: 'Golpe extremo, caro e crítico.', minLevel: 15, resourceCost: 34, damageMult: 3.25, missMod: 0.08, critMod: 0.1 },
+      { id: 'ladino_n5', name: 'Finta da Economia', description: 'Dano forte com boa chance crítica.', minLevel: 5, resourceCost: 16, damageMult: 1.4, missMod: 0.03, critMod: 0.05 },
+      { id: 'ladino_n10', name: 'Combo da Margem', description: 'Sequência agressiva para acelerar vitórias.', minLevel: 10, resourceCost: 26, damageMult: 1.95, missMod: 0.05, critMod: 0.08 },
+      { id: 'ladino_n15', name: 'Roubo do Rotativo', description: 'Golpe extremo, caro e crítico.', minLevel: 15, resourceCost: 38, damageMult: 2.6, missMod: 0.08, critMod: 0.1 },
     ]
   }
   return [
-    { id: 'guerreiro_n5', name: 'Escudo da Reserva', description: 'Ataque pesado e confiável.', minLevel: 5, resourceCost: 17, damageMult: 2, missMod: 0.03, critMod: 0.01 },
-    { id: 'guerreiro_n10', name: 'Carga do Patrimônio', description: 'Causa dano alto usando bastante Estamina.', minLevel: 10, resourceCost: 25, damageMult: 2.65, missMod: 0.05, critMod: 0.03 },
-    { id: 'guerreiro_n15', name: 'Quebra da Dívida', description: 'Golpe final pesado, caro e decisivo.', minLevel: 15, resourceCost: 35, damageMult: 3.35, missMod: 0.07, critMod: 0.05 },
+    { id: 'guerreiro_n5', name: 'Escudo da Reserva', description: 'Ataque pesado e confiável.', minLevel: 5, resourceCost: 17, damageMult: 1.42, missMod: 0.03, critMod: 0.01 },
+    { id: 'guerreiro_n10', name: 'Carga do Patrimônio', description: 'Causa dano alto usando bastante Estamina.', minLevel: 10, resourceCost: 27, damageMult: 2, missMod: 0.05, critMod: 0.03 },
+    { id: 'guerreiro_n15', name: 'Quebra da Dívida', description: 'Golpe final pesado, caro e decisivo.', minLevel: 15, resourceCost: 39, damageMult: 2.65, missMod: 0.07, critMod: 0.05 },
   ]
 }
 
@@ -2055,6 +2131,9 @@ function getEnemyAttacks(monster: BattleMonsterDefinition, level: number, battle
     tirano_da_alavancagem: ['Margem Chamando', 'Contrato Pesado', 'Efeito Dominó'],
     colosso_do_drawdown: ['Queda Profunda', 'Pânico de Mercado', 'Venda no Fundo'],
     oraculo_da_volatilidade: ['Oscilação Súbita', 'Ruído do Mercado', 'Profecia Instável'],
+    baronesa_do_rotativo: ['Convite ao Mínimo', 'Coroa dos Juros', 'Sentença do Rotativo'],
+    senhor_da_marcacao: ['Taxa Real Ascendente', 'Preço Marcado', 'Choque de Duration'],
+    imperador_da_alavancagem: ['Margem Imperial', 'Liquidação em Cadeia', 'Trono da Alavancagem'],
   }
   const [normal, strong, special] = names[monster.id] ?? names.cobrador
   return [
@@ -2105,6 +2184,17 @@ function finishInteractiveBattle(char: Character, battle: ActiveBattleState): Ba
     }
     current = applyLevelUp({ ...current, goldChest: (current.goldChest ?? 0) + goldGained }, xpGained)
     const result: BattleResult = { character: current, won: true, message: `${current.name} venceu a batalha contra um ${battle.monsterName}.`, xpGained, damageTaken: 0, goldGained, monsterName: battle.monsterName, playerBattleHpStart: battle.playerBattleHpStart, playerBattleHpEnd: battle.playerHp, monsterHpStart: battle.monsterHpStart, monsterHpEnd: battle.monsterHp, rounds: battle.rounds, xpBreakdown, itemGained }
+    result.boss = battle.boss
+    if (battle.boss) {
+      current = {
+        ...current,
+        battleBoss: {
+          ...current.battleBoss,
+          lastDefeatedDate: todayISO(),
+        },
+      }
+      result.character = current
+    }
     return { character: current, battle: { ...battle, finished: true, won: true, result }, message: result.message, result }
   }
 
@@ -2118,21 +2208,25 @@ function finishInteractiveBattle(char: Character, battle: ActiveBattleState): Ba
   } else if (reduced > 0) {
     current = appendEventLog(current, { type: 'damage', date: new Date().toISOString(), message: `${current.name} sofreu ${reduced} de dano real ao perder uma batalha contra ${battle.monsterName}.`, damage: reduced, lifeAfter: current.life })
   }
-  const result: BattleResult = { character: current, won: false, message: lifeAfterDamage <= 0 ? `${char.name} caiu em batalha contra ${battle.monsterName}.` : `${current.name} perdeu a batalha e recuou antes de cair.`, xpGained: lossXp, damageTaken: reduced, goldGained: 0, monsterName: battle.monsterName, playerBattleHpStart: battle.playerBattleHpStart, playerBattleHpEnd: battle.playerHp, monsterHpStart: battle.monsterHpStart, monsterHpEnd: battle.monsterHp, rounds: battle.rounds, xpBreakdown: lossXpBreakdown, died: lifeAfterDamage <= 0 }
+  const result: BattleResult = { character: current, won: false, message: lifeAfterDamage <= 0 ? `${char.name} caiu em batalha contra ${battle.monsterName}.` : `${current.name} perdeu a batalha e recuou antes de cair.`, xpGained: lossXp, damageTaken: reduced, goldGained: 0, monsterName: battle.monsterName, playerBattleHpStart: battle.playerBattleHpStart, playerBattleHpEnd: battle.playerHp, monsterHpStart: battle.monsterHpStart, monsterHpEnd: battle.monsterHp, rounds: battle.rounds, xpBreakdown: lossXpBreakdown, died: lifeAfterDamage <= 0, boss: battle.boss }
   return { character: current, battle: { ...battle, finished: true, won: false, result }, message: result.message, result }
 }
 
-export function startInteractiveBattle(char: Character, now = new Date()): StartBattleResult {
+export function startInteractiveBattle(char: Character, now = new Date(), options?: { boss?: boolean }): StartBattleResult {
   let current = normalizeCharacter(char)
   if (current.life <= 0) return { character: current, ok: false, message: 'Sem vida para lutar agora.' }
-  const charged = consumeBattleCharge(current, now)
-  current = charged.character
-  if (!charged.ok) return { character: current, ok: false, message: charged.message ?? 'A arena ainda está recuperando energia.' }
+  const isBoss = Boolean(options?.boss)
+  if (!isBoss) {
+    const charged = consumeBattleCharge(current, now)
+    current = charged.character
+    if (!charged.ok) return { character: current, ok: false, message: charged.message ?? 'A arena ainda está recuperando energia.' }
+  }
   const battleNumber = battlesToday(current)
-  const monster = chooseBattleMonster(current, battleNumber)
+  const monster = isBoss ? chooseBattleBoss(current) : chooseBattleMonster(current, battleNumber)
   const attrs = calcEffectiveAttributes(current)
-  const playerBattleHpStart = Math.max(18 + current.level * 4, current.life + current.level * 4 + attrs.vigor * 2 + attrs.resiliencia)
+  const playerBattleHpStart = Math.max(18 + current.level * 4, current.life + current.level * 4 + attrs.vigor * 2 + attrs.resiliencia + (isBoss ? current.level * 2 : 0))
   const monsterHpStart = Math.round((16 + current.level * 5 + battleNumber * 3) * monster.hpMult)
+  const bossShieldMax = isBoss ? Math.round(monsterHpStart * 0.35) : 0
   const playerResourceMax = battleResourceMax(current)
   const enemyResourceMax = 18 + current.level * 2 + battleNumber
   const battle: ActiveBattleState = {
@@ -2143,6 +2237,8 @@ export function startInteractiveBattle(char: Character, now = new Date()): Start
     playerHp: playerBattleHpStart,
     monsterHpStart,
     monsterHp: monsterHpStart,
+    bossShield: bossShieldMax,
+    bossShieldMax,
     playerResource: playerResourceMax,
     playerResourceMax,
     playerSpecial: 0,
@@ -2155,10 +2251,11 @@ export function startInteractiveBattle(char: Character, now = new Date()): Start
     playerTechniques: getBattlePlayerTechniques(current),
     enemyAttacks: getEnemyAttacks(monster, current.level, battleNumber),
     classProfile: getBattleClassProfile(current),
-    rounds: [{ turn: 1, actor: 'system', result: 'hit', damage: 0, playerHp: playerBattleHpStart, monsterHp: monsterHpStart, text: `${monster.name} entrou na arena. Escolha cada turno: ataque, item, golpe forte ou carregue o especial com conhecimento financeiro.` }],
+    boss: isBoss,
+    rounds: [{ turn: 1, actor: 'system', result: 'hit', damage: 0, playerHp: playerBattleHpStart, monsterHp: monsterHpStart, text: isBoss ? `${monster.name} surgiu com um Escudo de Patrimônio. Só um Especial quebra esse escudo.` : `${monster.name} entrou na arena. Escolha cada turno: ataque, item, golpe forte ou carregue o especial com conhecimento financeiro.` }],
   }
-  current = incrementBattleCount(current)
-  return { character: current, ok: true, message: 'Batalha iniciada. Uma carga da arena foi consumida.', battle }
+  if (!isBoss) current = incrementBattleCount(current)
+  return { character: current, ok: true, message: isBoss ? 'Chefão encontrado. O Escudo de Patrimônio só cai com Especial.' : 'Batalha iniciada. Uma carga da arena foi consumida.', battle }
 }
 
 function enemyTurn(char: Character, battle: ActiveBattleState): ActiveBattleState {
@@ -2175,14 +2272,67 @@ function enemyTurn(char: Character, battle: ActiveBattleState): ActiveBattleStat
     const critical = roll > 1 - attack.critChance
     const baseDamage = randomInt(attack.minDamage, attack.maxDamage)
     const damage = critical ? Math.round(baseDamage * 1.55) : baseDamage
+    const canKnowledgeBlock = attack.resourceCost > 0 && Math.random() < 0.65
+    if (canKnowledgeBlock) {
+      return {
+        ...next,
+        pendingKnowledgeBlock: {
+          attackName: attack.name,
+          damage,
+          critical,
+          question: drawBattleQuizQuestion(attack.resourceCost >= 18 ? 'hard' : 'medium'),
+        },
+      }
+    }
     next = { ...next, playerHp: Math.max(0, next.playerHp - damage) }
     next = addBattleRound(next, { turn: battle.turn, actor: 'monster', result: critical ? 'critical' : 'hit', damage, playerHp: next.playerHp, monsterHp: next.monsterHp, text: critical ? `${battle.monsterName} acertou ${attack.name} em cheio e causou ${damage} de dano.` : `${battle.monsterName} usou ${attack.name} e causou ${damage} de dano.` })
   }
   return { ...next, enemyResource: Math.min(next.enemyResourceMax, next.enemyResource + 4), playerResource: Math.min(next.playerResourceMax, next.playerResource + next.classProfile.regenPerTurn), turn: next.turn + 1 }
 }
 
+export function answerKnowledgeBlock(char: Character, battle: ActiveBattleState, optionIndex: number): BattleTurnResult {
+  const current = normalizeCharacter(char)
+  const pending = battle.pendingKnowledgeBlock
+  if (!pending) return { character: current, battle, message: 'Não há golpe para bloquear.' }
+
+  const correct = optionIndex === pending.question.correctIndex
+  let next: ActiveBattleState = { ...battle, pendingKnowledgeBlock: undefined }
+  if (correct) {
+    next = addBattleRound(next, {
+      turn: next.turn,
+      actor: 'player',
+      result: 'critical',
+      damage: 0,
+      playerHp: next.playerHp,
+      monsterHp: next.monsterHp,
+      text: `Escudo do Conhecimento! ${pending.question.explanation} Você bloqueou ${pending.attackName}.`,
+    })
+  } else {
+    next = { ...next, playerHp: Math.max(0, next.playerHp - pending.damage) }
+    next = addBattleRound(next, {
+      turn: next.turn,
+      actor: 'monster',
+      result: pending.critical ? 'critical' : 'hit',
+      damage: pending.damage,
+      playerHp: next.playerHp,
+      monsterHp: next.monsterHp,
+      text: `Resposta errada. ${pending.question.explanation} ${battle.monsterName} completou ${pending.attackName} e causou ${pending.damage} de dano.`,
+    })
+  }
+
+  next = {
+    ...next,
+    enemyResource: Math.min(next.enemyResourceMax, next.enemyResource + 4),
+    playerResource: Math.min(next.playerResourceMax, next.playerResource + next.classProfile.regenPerTurn),
+    turn: next.turn + 1,
+  }
+  if (next.playerHp <= 0) return finishInteractiveBattle(current, next)
+  return { character: current, battle: next, message: correct ? 'Golpe bloqueado pelo Escudo do Conhecimento.' : 'Bloqueio falhou.' }
+}
+
 export function performBattleTurn(char: Character, battle: ActiveBattleState, action: { type: 'attack' | 'strong' | 'special' | 'technique' | 'item'; itemId?: ConsumableItemId; techniqueId?: string }): BattleTurnResult {
   let current = normalizeCharacter(char)
+  if (battle.pendingKnowledgeBlock) return { character: current, battle, message: 'Responda ao Escudo do Conhecimento antes de agir.' }
   if (battle.finished) return { character: current, battle, message: battle.result?.message ?? 'A batalha já terminou.', result: battle.result }
   let next = { ...battle }
   const attrs = calcEffectiveAttributes(current)
@@ -2217,8 +2367,15 @@ export function performBattleTurn(char: Character, battle: ActiveBattleState, ac
       const multiplier = technique?.damageMult ?? (isSpecial ? 3.2 : isStrong ? 1.6 : 1)
       const baseDamage = Math.max(2, Math.round(attackBase * multiplier + randomInt(0, 3 + current.level)))
       const damage = critical ? Math.round(baseDamage * 1.75) : baseDamage
-      next = { ...next, monsterHp: Math.max(0, next.monsterHp - damage) }
-      next = addBattleRound(next, { turn: next.turn, actor: 'player', result: critical ? 'critical' : 'hit', damage, playerHp: next.playerHp, monsterHp: next.monsterHp, text: critical ? `Crítico! ${current.name} usou ${attackName} e causou ${damage} de dano.` : `${current.name} usou ${attackName} e causou ${damage} de dano.` })
+      if (next.boss && next.bossShield > 0 && !isSpecial) {
+        const shieldDamage = Math.min(next.bossShield, Math.max(1, Math.round(damage * 0.35)))
+        next = { ...next, bossShield: Math.max(0, next.bossShield - shieldDamage) }
+        next = addBattleRound(next, { turn: next.turn, actor: 'player', result: 'hit', damage: 0, playerHp: next.playerHp, monsterHp: next.monsterHp, text: `${current.name} usou ${attackName}, mas o Escudo de Patrimônio absorveu o golpe. Escudo -${shieldDamage}. Use Especial para quebrá-lo.` })
+      } else {
+        const shieldText = next.boss && next.bossShield > 0 && isSpecial ? ' O Escudo de Patrimônio foi quebrado.' : ''
+        next = { ...next, bossShield: isSpecial ? 0 : next.bossShield, monsterHp: Math.max(0, next.monsterHp - damage) }
+        next = addBattleRound(next, { turn: next.turn, actor: 'player', result: critical ? 'critical' : 'hit', damage, playerHp: next.playerHp, monsterHp: next.monsterHp, text: critical ? `Crítico! ${current.name} usou ${attackName} e causou ${damage} de dano.${shieldText}` : `${current.name} usou ${attackName} e causou ${damage} de dano.${shieldText}` })
+      }
     }
   }
 
