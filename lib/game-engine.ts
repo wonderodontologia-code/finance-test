@@ -362,7 +362,7 @@ const WEEKLY_CONTRACT_POOL: WeeklyContractDefinition[] = [
 const TITLES: TitleDefinition[] = [
   { id: 'guardiao_da_cota', name: 'Guardião da Cota', description: 'Mantenha o ciclo em até 80% do Tesouro Máximo.' },
   { id: 'cartografo_do_saldo', name: 'Cartógrafo do Saldo', description: 'Explore 3 locais do reino.' },
-  { id: 'campeao_da_arena', name: 'Campeão da Arena', description: 'Use as 3 batalhas diárias pelo menos uma vez.' },
+  { id: 'campeao_da_arena', name: 'Campeão da Arena', description: 'Realize batalhas suficientes para ser reconhecido na arena.' },
   { id: 'arquivista_do_livro', name: 'Arquivista do Livro', description: 'Faça 7 registros no ciclo atual.' },
   { id: 'sobrevivente_do_tombo', name: 'Sobrevivente do Tombo', description: 'Tenha sobrevivido a pelo menos uma morte e continuado a jornada.' },
   { id: 'mestre_dos_contratos', name: 'Mestre dos Contratos', description: 'Conclua todos os contratos diários de hoje.' },
@@ -966,7 +966,7 @@ export interface BattleResult {
 
 export interface BattleRound {
   turn: number
-  actor: 'player' | 'monster'
+  actor: 'player' | 'monster' | 'system'
   result: 'hit' | 'miss' | 'critical'
   damage: number
   playerHp: number
@@ -974,10 +974,104 @@ export interface BattleRound {
   text: string
 }
 
+export type BattleActionId = 'attack' | 'strong' | 'special' | 'quiz' | 'item' | 'technique'
+export type BattleQuizDifficulty = 'easy' | 'medium' | 'hard'
+
+export interface BattleEnemyAttack {
+  id: string
+  name: string
+  description: string
+  resourceCost: number
+  minDamage: number
+  maxDamage: number
+  missChance: number
+  critChance: number
+}
+
+export interface BattlePlayerTechnique {
+  id: string
+  name: string
+  description: string
+  minLevel: number
+  resourceCost: number
+  damageMult: number
+  missMod: number
+  critMod: number
+}
+
+export interface BattleClassCombatProfile {
+  resourceName: string
+  normalAttackName: string
+  strongAttackName: string
+  specialAttackName: string
+  strongDescription: string
+  strongCost: number
+  regenPerTurn: number
+}
+
+export interface BattleQuizQuestion {
+  id: string
+  difficulty: BattleQuizDifficulty
+  prompt: string
+  options: string[]
+  correctIndex: number
+  explanation: string
+}
+
+export interface BattleQuizAnswerResult {
+  character: Character
+  battle: ActiveBattleState
+  correct: boolean
+  chargeGained: number
+  message: string
+  result?: BattleResult
+}
+
+export interface ActiveBattleState {
+  id: string
+  monsterId: string
+  monsterName: string
+  playerBattleHpStart: number
+  playerHp: number
+  monsterHpStart: number
+  monsterHp: number
+  playerResource: number
+  playerResourceMax: number
+  playerSpecial: number
+  playerSpecialMax: number
+  enemyResource: number
+  enemyResourceMax: number
+  turn: number
+  battleNumber: number
+  defeatDamage: number
+  playerTechniques: BattlePlayerTechnique[]
+  enemyAttacks: BattleEnemyAttack[]
+  classProfile: BattleClassCombatProfile
+  rounds: BattleRound[]
+  finished?: boolean
+  won?: boolean
+  result?: BattleResult
+}
+
+export interface StartBattleResult {
+  character: Character
+  ok: boolean
+  message: string
+  battle?: ActiveBattleState
+}
+
+export interface BattleTurnResult {
+  character: Character
+  battle: ActiveBattleState
+  message: string
+  result?: BattleResult
+}
+
 interface BattleMonsterDefinition {
   id: string
   name: string
   minLevel: number
+  maxLevel?: number
   weight: number
   hpMult: number
   powerMult: number
@@ -992,6 +1086,7 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
     id: 'cobrador',
     name: 'Cobrador da Masmorra',
     minLevel: 1,
+    maxLevel: 4,
     weight: 5,
     hpMult: 1,
     powerMult: 1,
@@ -1003,7 +1098,8 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
   {
     id: 'fatura_viva',
     name: 'Fatura Viva',
-    minLevel: 2,
+    minLevel: 1,
+    maxLevel: 4,
     weight: 4,
     hpMult: 1.12,
     powerMult: 1.08,
@@ -1013,35 +1109,233 @@ const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
     critMod: 0.01,
   },
   {
+    id: 'boleto_rastejante',
+    name: 'Boleto Rastejante',
+    minLevel: 1,
+    maxLevel: 4,
+    weight: 3,
+    hpMult: 0.95,
+    powerMult: 0.95,
+    xpBonus: 2,
+    goldBonus: 2,
+    missMod: 0.02,
+    critMod: -0.01,
+  },
+  {
+    id: 'vendedor_impulsivo',
+    name: 'Vendedor Impulsivo',
+    minLevel: 1,
+    maxLevel: 4,
+    weight: 3,
+    hpMult: 1.05,
+    powerMult: 1.03,
+    xpBonus: 3,
+    goldBonus: 3,
+    missMod: 0,
+    critMod: 0.01,
+  },
+  {
     id: 'agente_dos_juros',
     name: 'Agente dos Juros',
-    minLevel: 4,
-    weight: 3,
-    hpMult: 1.28,
-    powerMult: 1.22,
+    minLevel: 5,
+    maxLevel: 9,
+    weight: 4,
+    hpMult: 1.08,
+    powerMult: 1.06,
+    xpBonus: 7,
+    goldBonus: 7,
+    missMod: -0.01,
+    critMod: 0.015,
+  },
+  {
+    id: 'parcelador_sombrio',
+    name: 'Parcelador Sombrio',
+    minLevel: 5,
+    maxLevel: 9,
+    weight: 4,
+    hpMult: 1.12,
+    powerMult: 1.08,
     xpBonus: 8,
     goldBonus: 8,
-    missMod: -0.04,
-    critMod: 0.025,
+    missMod: -0.02,
+    critMod: 0.02,
+  },
+  {
+    id: 'assinatura_fantasma',
+    name: 'Assinatura Fantasma',
+    minLevel: 5,
+    maxLevel: 9,
+    weight: 3,
+    hpMult: 0.98,
+    powerMult: 1.12,
+    xpBonus: 9,
+    goldBonus: 9,
+    missMod: 0.03,
+    critMod: 0.03,
   },
   {
     id: 'devorador_de_limite',
     name: 'Devorador de Limite',
-    minLevel: 6,
-    weight: 2,
-    hpMult: 1.45,
-    powerMult: 1.36,
+    minLevel: 10,
+    maxLevel: 14,
+    weight: 4,
+    hpMult: 1.18,
+    powerMult: 1.13,
+    xpBonus: 13,
+    goldBonus: 13,
+    missMod: -0.03,
+    critMod: 0.035,
+  },
+  {
+    id: 'inflacao_carmesim',
+    name: 'Inflação Carmesim',
+    minLevel: 10,
+    maxLevel: 14,
+    weight: 3,
+    hpMult: 1.22,
+    powerMult: 1.1,
     xpBonus: 14,
     goldBonus: 14,
-    missMod: -0.06,
-    critMod: 0.04,
+    missMod: -0.01,
+    critMod: 0.025,
+  },
+  {
+    id: 'consultor_duvidoso',
+    name: 'Consultor Duvidoso',
+    minLevel: 10,
+    maxLevel: 14,
+    weight: 3,
+    hpMult: 1.05,
+    powerMult: 1.18,
+    xpBonus: 15,
+    goldBonus: 15,
+    missMod: 0.02,
+    critMod: 0.05,
+  },
+  {
+    id: 'dragao_do_rotativo',
+    name: 'Dragão do Rotativo',
+    minLevel: 15,
+    maxLevel: 19,
+    weight: 3,
+    hpMult: 1.3,
+    powerMult: 1.2,
+    xpBonus: 20,
+    goldBonus: 20,
+    missMod: -0.04,
+    critMod: 0.05,
+  },
+  {
+    id: 'especulador_abissal',
+    name: 'Especulador Abissal',
+    minLevel: 15,
+    maxLevel: 19,
+    weight: 3,
+    hpMult: 1.16,
+    powerMult: 1.26,
+    xpBonus: 21,
+    goldBonus: 21,
+    missMod: 0.03,
+    critMod: 0.07,
+  },
+  {
+    id: 'tirano_da_alavancagem',
+    name: 'Tirano da Alavancagem',
+    minLevel: 15,
+    maxLevel: 19,
+    weight: 2,
+    hpMult: 1.36,
+    powerMult: 1.24,
+    xpBonus: 23,
+    goldBonus: 23,
+    missMod: -0.02,
+    critMod: 0.06,
+  },
+  {
+    id: 'colosso_do_drawdown',
+    name: 'Colosso do Drawdown',
+    minLevel: 20,
+    weight: 3,
+    hpMult: 1.42,
+    powerMult: 1.3,
+    xpBonus: 30,
+    goldBonus: 30,
+    missMod: -0.03,
+    critMod: 0.07,
+  },
+  {
+    id: 'oraculo_da_volatilidade',
+    name: 'Oráculo da Volatilidade',
+    minLevel: 20,
+    weight: 2,
+    hpMult: 1.28,
+    powerMult: 1.38,
+    xpBonus: 32,
+    goldBonus: 32,
+    missMod: 0.04,
+    critMod: 0.09,
   },
 ]
 
 function chooseBattleMonster(char: Character, battleNumber: number): BattleMonsterDefinition {
-  const available = BATTLE_MONSTERS.filter(monster => char.level >= monster.minLevel)
+  const available = BATTLE_MONSTERS.filter(monster => char.level >= monster.minLevel && (!monster.maxLevel || char.level <= monster.maxLevel))
   const weighted = available.flatMap(monster => Array.from({ length: monster.weight + battleNumber }, () => monster))
   return weighted[Math.floor(Math.random() * weighted.length)] ?? BATTLE_MONSTERS[0]
+}
+
+export const BATTLE_MAX_CHARGES = 5
+export const BATTLE_CHARGE_REGEN_MS = 60 * 60 * 1000
+
+export function getBattleCharges(char: Character, now = new Date()): {
+  current: number
+  max: number
+  nextAt: Date | null
+  remainingMs: number
+  character: Character
+} {
+  const current = normalizeCharacter(char)
+  const stored = current.battleCharges
+  if (!stored?.updatedAt) {
+    const character = { ...current, battleCharges: { current: BATTLE_MAX_CHARGES, updatedAt: now.toISOString() } }
+    return { current: BATTLE_MAX_CHARGES, max: BATTLE_MAX_CHARGES, nextAt: null, remainingMs: 0, character }
+  }
+
+  const updatedAt = new Date(stored.updatedAt)
+  const safeUpdatedAt = Number.isNaN(updatedAt.getTime()) ? now : updatedAt
+  const safeCurrent = Math.max(0, Math.min(BATTLE_MAX_CHARGES, Math.floor(stored.current ?? BATTLE_MAX_CHARGES)))
+  const elapsed = Math.max(0, now.getTime() - safeUpdatedAt.getTime())
+  const gained = Math.floor(elapsed / BATTLE_CHARGE_REGEN_MS)
+  const regenerated = Math.min(BATTLE_MAX_CHARGES, safeCurrent + gained)
+  const nextUpdatedAt = regenerated >= BATTLE_MAX_CHARGES
+    ? now
+    : new Date(safeUpdatedAt.getTime() + gained * BATTLE_CHARGE_REGEN_MS)
+  const nextAt = regenerated >= BATTLE_MAX_CHARGES ? null : new Date(nextUpdatedAt.getTime() + BATTLE_CHARGE_REGEN_MS)
+  const character = { ...current, battleCharges: { current: regenerated, updatedAt: nextUpdatedAt.toISOString() } }
+  return {
+    current: regenerated,
+    max: BATTLE_MAX_CHARGES,
+    nextAt,
+    remainingMs: nextAt ? Math.max(0, nextAt.getTime() - now.getTime()) : 0,
+    character,
+  }
+}
+
+function consumeBattleCharge(char: Character, now = new Date()): { ok: boolean; character: Character; current: number; message?: string } {
+  const charges = getBattleCharges(char, now)
+  if (charges.current <= 0) {
+    return { ok: false, character: charges.character, current: 0, message: 'A energia da arena acabou. Ela recupera 1 carga por hora, até o máximo de 5.' }
+  }
+  return {
+    ok: true,
+    character: {
+      ...charges.character,
+      battleCharges: {
+        current: charges.current - 1,
+        updatedAt: now.toISOString(),
+      },
+    },
+    current: charges.current - 1,
+  }
 }
 
 export function battlesToday(char: Character): number {
@@ -1452,16 +1746,516 @@ export function performCheckin(char: Character): CheckinResult {
   }
 }
 
+const BATTLE_QUIZ_BANK_BASE: BattleQuizQuestion[] = [
+  { id: 'easy_cet', difficulty: 'easy', prompt: 'Ao comparar dois empréstimos, qual métrica costuma revelar melhor o custo total da operação?', options: ['Taxa nominal mensal isolada', 'CET, incluindo juros, tarifas e encargos', 'Valor da parcela apenas', 'Prazo total sem olhar taxa'], correctIndex: 1, explanation: 'O CET compara o custo total porque reúne juros e encargos relevantes.' },
+  { id: 'easy_reserva', difficulty: 'easy', prompt: 'Uma reserva de emergência deve priorizar qual combinação?', options: ['Alta volatilidade e maior retorno possível', 'Liquidez e baixo risco', 'Baixa liquidez e carência longa', 'Rendimento atrelado a ativos sem garantia'], correctIndex: 1, explanation: 'Reserva existe para acesso rápido e previsível, não para maximizar retorno.' },
+  { id: 'easy_divida', difficulty: 'easy', prompt: 'Você tem uma dívida rotativa do cartão e um investimento conservador rendendo menos que ela. A decisão financeiramente mais racional tende a ser:', options: ['Manter o investimento e pagar o mínimo', 'Quitar ou amortizar a dívida cara primeiro', 'Contrair outra dívida para investir', 'Ignorar a taxa e olhar só a parcela'], correctIndex: 1, explanation: 'Juros de dívida cara normalmente superam investimentos conservadores.' },
+  { id: 'easy_liquidez', difficulty: 'easy', prompt: 'Um investimento com D+0 normalmente significa que o dinheiro:', options: ['Cai no mesmo dia útil', 'Só cai no vencimento', 'Nunca pode ser resgatado', 'Sempre rende zero'], correctIndex: 0, explanation: 'D+0 indica liquidação no mesmo dia útil, embora regras e horários do produto importem.' },
+  { id: 'easy_inflacao', difficulty: 'easy', prompt: 'Se os preços sobem mais rápido que seu salário, seu poder de compra:', options: ['Aumenta automaticamente', 'Fica igual', 'Diminui', 'Depende apenas do CDI'], correctIndex: 2, explanation: 'Inflação acima da renda corrói poder de compra.' },
+  { id: 'easy_diversificacao', difficulty: 'easy', prompt: 'Diversificar uma carteira busca principalmente:', options: ['Garantir lucro todo mês', 'Reduzir concentração em poucos riscos', 'Eliminar todos os riscos', 'Trocar liquidez por sorte'], correctIndex: 1, explanation: 'Diversificação reduz concentração, mas não elimina risco.' },
+  { id: 'medium_duration', difficulty: 'medium', prompt: 'Em um título prefixado ou IPCA+ marcado a mercado, o que tende a aumentar mais a sensibilidade do preço quando a taxa de juros muda?', options: ['Menor prazo médio do fluxo', 'Maior duration', 'Maior liquidez diária', 'Cupom sem relação com prazo'], correctIndex: 1, explanation: 'Duration maior significa mais sensibilidade do preço às mudanças de taxa.' },
+  { id: 'medium_real_return', difficulty: 'medium', prompt: 'Um investimento rendeu 10% no ano e a inflação foi 6%. Aproximadamente, o retorno real correto é:', options: ['4,00% exatos por subtração simples', 'Cerca de 3,77%', '16,00%', '10,00%, pois inflação não entra no cálculo'], correctIndex: 1, explanation: 'A conta exata é 1,10 / 1,06 - 1, cerca de 3,77%.' },
+  { id: 'medium_credit_risk', difficulty: 'medium', prompt: 'Dois CDBs pagam 100% do CDI. Um é de banco grande, outro de instituição menor. Qual risco mais muda entre eles?', options: ['Risco de crédito do emissor', 'Risco cambial obrigatório', 'Risco de inflação do IPCA', 'Risco de renda variável'], correctIndex: 0, explanation: 'Mesmo indexador não elimina risco de crédito do emissor.' },
+  { id: 'medium_cdi_percent', difficulty: 'medium', prompt: 'Um CDB de 90% do CDI tende a render, antes de impostos:', options: ['Mais que 100% do CDI', 'Exatamente o CDI', 'Menos que 100% do CDI', 'Sempre mais que IPCA+'], correctIndex: 2, explanation: '90% do CDI é uma fração do CDI; impostos e prazos ainda afetam o líquido.' },
+  { id: 'medium_taxa_real', difficulty: 'medium', prompt: 'Ao avaliar um título IPCA+ 6%, o “+6%” representa:', options: ['Juro real acima da inflação contratada', 'Inflação fixa de 6%', 'CDI anual garantido', 'Taxa nominal sem inflação'], correctIndex: 0, explanation: 'IPCA+ combina variação do IPCA com uma taxa real contratada.' },
+  { id: 'medium_fg_cobertura', difficulty: 'medium', prompt: 'A cobertura do FGC em CDB/LCI/LCA costuma proteger principalmente contra:', options: ['Oscilação diária de preço', 'Inadimplência da instituição dentro dos limites', 'Imposto de renda', 'Inflação futura'], correctIndex: 1, explanation: 'O FGC cobre risco de crédito dentro de regras e limites, não volatilidade ou impostos.' },
+  { id: 'hard_ipca_mark', difficulty: 'hard', prompt: 'Você compra Tesouro IPCA+ longo e pretende vender antes do vencimento. Se as taxas reais de mercado sobem logo depois da compra, o preço do título tende a:', options: ['Subir, pois IPCA protege contra tudo', 'Cair por marcação a mercado', 'Ficar sempre no valor investido', 'Render exatamente o IPCA do período sem oscilação'], correctIndex: 1, explanation: 'A proteção contratada vale no vencimento; venda antecipada sofre marcação a mercado.' },
+  { id: 'hard_correlation', difficulty: 'hard', prompt: 'Uma carteira com muitos ativos altamente correlacionados reduz pouco qual tipo de risco?', options: ['Risco diversificável específico', 'Risco de liquidez de cada ativo', 'Risco de concentração econômica comum', 'Risco de custódia automaticamente'], correctIndex: 2, explanation: 'Quantidade sem baixa correlação pode manter exposição ao mesmo fator econômico.' },
+  { id: 'hard_tax', difficulty: 'hard', prompt: 'Em renda fixa tributável no Brasil, a alíquota regressiva de IR normalmente favorece mais:', options: ['Resgates em menos de 180 dias', 'Prazos acima de 720 dias', 'Girar todo mês para realizar lucro', 'Produtos isentos pagando qualquer taxa'], correctIndex: 1, explanation: 'A tabela regressiva chega à menor alíquota em prazos longos, geralmente acima de 720 dias.' },
+  { id: 'hard_debenture', difficulty: 'hard', prompt: 'Uma debênture incentivada isenta de IR pode ainda ser pior que um CDB tributado se:', options: ['Seu risco e taxa líquida não compensarem', 'Todo ativo isento for sempre melhor', 'Não houver marcação a mercado em crédito privado', 'CDI deixar de existir'], correctIndex: 0, explanation: 'Isenção é só um componente; risco de crédito, liquidez e taxa líquida precisam compensar.' },
+  { id: 'hard_prefixado', difficulty: 'hard', prompt: 'Comprar um prefixado longo é mais arriscado quando:', options: ['Você tem certeza que venderá só no vencimento', 'Há chance de precisar vender antes e as taxas podem subir', 'A taxa contratada está clara', 'A liquidez é irrelevante'], correctIndex: 1, explanation: 'Venda antecipada pode sofrer perda por marcação a mercado se as taxas subirem.' },
+  { id: 'hard_sharpe', difficulty: 'hard', prompt: 'Um índice de Sharpe maior sugere, em geral:', options: ['Maior retorno ajustado ao risco medido', 'Maior retorno bruto sempre', 'Risco zero', 'Liquidez imediata'], correctIndex: 0, explanation: 'Sharpe relaciona excesso de retorno com volatilidade, não garante retorno nem elimina risco.' },
+]
+
+function battleQuestion(
+  id: string,
+  difficulty: BattleQuizDifficulty,
+  prompt: string,
+  correct: string,
+  wrongs: readonly [string, string, string],
+  explanation: string
+): BattleQuizQuestion {
+  const options = [...wrongs]
+  const correctIndex = id.length % 4
+  options.splice(correctIndex, 0, correct)
+  return { id, difficulty, prompt, options, correctIndex, explanation }
+}
+
+function percent(value: number): string {
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`
+}
+
+const EASY_DECISION_QUESTIONS = [
+  ['bonus_cartao', 'Você recebeu um bônus e tem cartão rotativo aberto. Qual uso tende a ser mais saudável?', 'Amortizar a dívida cara primeiro', ['Comprar algo parcelado', 'Aplicar em produto de alto risco', 'Pagar só o mínimo do cartão']],
+  ['reserva_curto', 'Dinheiro que pode ser necessário em poucos dias deveria ficar principalmente em:', 'Produto líquido e conservador', ['Ação volátil', 'Cripto sem reserva paralela', 'Título longo para vender no susto']],
+  ['compra_impulso', 'Antes de comprar algo por impulso, a pergunta mais útil é:', 'Isso cabe no orçamento sem prejudicar prioridades?', ['Qual é a cor mais bonita?', 'Dá para parcelar no máximo?', 'O desconto vence hoje?']],
+  ['assinatura', 'Uma cobrança mensal esquecida no cartão é melhor tratada como:', 'Gasto recorrente a revisar ou cancelar', ['Investimento automático', 'Dívida boa sempre', 'Renda passiva']],
+  ['parcelamento', 'Parcelar uma compra faz mais sentido quando:', 'A parcela cabe e o custo total foi comparado', ['A parcela parece pequena isoladamente', 'Não há limite no cartão', 'O prazo é o maior possível']],
+  ['orcamento', 'Um orçamento mensal serve principalmente para:', 'Dar clareza às escolhas antes do dinheiro acabar', ['Proibir todo lazer', 'Prever o mercado financeiro', 'Eliminar impostos']],
+  ['meta', 'Uma meta financeira bem definida costuma ter:', 'Valor, prazo e prioridade', ['Só vontade', 'Só rendimento esperado', 'Só nome bonito']],
+  ['emergencia', 'Reserva de emergência não deve depender de:', 'Ativo que pode cair muito bem na hora do resgate', ['Liquidez', 'Segurança', 'Previsibilidade']],
+  ['dica_risco', 'Quanto maior a promessa de retorno sem risco, maior deve ser:', 'A desconfiança', ['A pressa de entrar', 'O limite do cartão usado', 'A concentração total']],
+  ['zero_gasto', 'Um dia de gasto zero ajuda mais quando:', 'Não vira compensação exagerada no dia seguinte', ['Gera prêmio para gastar tudo depois', 'Ignora contas fixas', 'Substitui planejamento']],
+] as const
+
+const EASY_CONCEPT_QUESTIONS = [
+  ['selic', 'A Selic é frequentemente usada como referência para:', 'Juros básicos da economia', ['Preço do dólar turismo', 'Inflação oficial acumulada', 'Lucro de empresas']],
+  ['ipca', 'IPCA mede principalmente:', 'Variação de preços ao consumidor', ['Taxa do CDI', 'Risco de crédito bancário', 'Rentabilidade da bolsa']],
+  ['cdi', 'CDI costuma ser referência para muitos produtos de:', 'Renda fixa pós-fixada', ['Imóveis físicos', 'Colecionáveis', 'Seguro automotivo']],
+  ['liquidez', 'Liquidez é a capacidade de:', 'Transformar o ativo em dinheiro em certo prazo', ['Garantir lucro', 'Evitar todo imposto', 'Multiplicar risco']],
+  ['credito', 'Risco de crédito é o risco de:', 'O emissor não honrar o pagamento', ['A inflação cair', 'O app mudar de cor', 'O investidor esquecer a senha']],
+  ['mercado', 'Risco de mercado aparece quando:', 'O preço oscila por mudanças nas condições de mercado', ['A conta vence no sábado', 'O produto é isento de IR', 'O banco abre agência nova']],
+  ['diversificar', 'Ter tudo em um único ativo aumenta:', 'Risco de concentração', ['Proteção automática', 'Liquidez infinita', 'Garantia de retorno']],
+  ['juros_compostos', 'Juros compostos significam que:', 'Rendimento passa a incidir também sobre rendimentos anteriores', ['Juros desaparecem', 'Só existe juro simples', 'Imposto vira rendimento']],
+  ['custo_oportunidade', 'Custo de oportunidade é:', 'O benefício que você deixa ao escolher outra opção', ['Uma tarifa obrigatória', 'Um imposto novo', 'Um tipo de cartão']],
+  ['patrimonio', 'Patrimônio líquido pessoal é, em geral:', 'Ativos menos dívidas', ['Salário bruto', 'Limite do cartão', 'Soma das parcelas']],
+] as const
+
+const EASY_PRODUCT_QUESTIONS = [
+  ['tesouro_selic', 'Para uma meta de curtíssimo prazo com prioridade em estabilidade, tende a combinar melhor:', 'Tesouro Selic ou opção conservadora similar', ['Ação individual concentrada', 'Fundo alavancado', 'Título longo prefixado sem tolerar oscilação']],
+  ['longo_prazo', 'Para objetivos de longo prazo, uma vantagem de investir com regularidade é:', 'Reduzir dependência de acertar o dia perfeito', ['Garantir lucro mensal', 'Eliminar quedas', 'Evitar qualquer planejamento']],
+  ['fgc_basico', 'CDB, LCI e LCA podem ter proteção do FGC dentro de regras e limites. Isso reduz principalmente:', 'Risco de crédito da instituição', ['Risco de mercado de ações', 'Imposto futuro', 'Inflação do país']],
+  ['poupanca', 'Poupança costuma ser simples, mas pode perder atratividade quando:', 'Há alternativas conservadoras com melhor rendimento líquido', ['Toda alternativa é ilegal', 'Liquidez deixa de existir', 'Inflação não importa']],
+  ['cartao', 'Pagar o total da fatura do cartão evita:', 'Juros do rotativo', ['Toda compra futura', 'Qualquer imposto', 'A necessidade de orçamento']],
+  ['debito_credito', 'Usar crédito como extensão da renda tende a:', 'Aumentar risco de descontrole', ['Criar renda extra', 'Reduzir preço automaticamente', 'Quitar dívidas sozinho']],
+  ['caixinha', 'Separar dinheiro em caixinhas ajuda porque:', 'Dá função clara para cada valor', ['Aumenta taxa por mágica', 'Remove risco de qualquer ativo', 'Dispensa acompanhamento']],
+  ['seguro', 'Seguro e investimento têm papéis diferentes porque:', 'Seguro transfere risco; investimento busca acumular patrimônio', ['Ambos são sempre a mesma coisa', 'Seguro sempre rende mais', 'Investimento elimina sinistro']],
+  ['renda_variavel', 'Renda variável combina melhor com dinheiro que:', 'Pode ficar investido por mais tempo e tolera oscilações', ['Vai pagar boleto amanhã', 'É reserva de emergência única', 'Não pode cair nunca']],
+  ['emprestimo', 'Antes de contratar empréstimo, é essencial comparar:', 'CET, prazo e impacto no orçamento', ['Só propaganda', 'Cor do cartão', 'Nome da financeira']],
+] as const
+
+const MEDIUM_NUMERIC_QUESTIONS = [
+  [12, 5, 'medium_real_12_5'],
+  [15, 8, 'medium_real_15_8'],
+  [9, 4, 'medium_real_9_4'],
+  [18, 10, 'medium_real_18_10'],
+  [7, 6, 'medium_real_7_6'],
+  [20, 12, 'medium_real_20_12'],
+  [11, 9, 'medium_real_11_9'],
+  [14, 3, 'medium_real_14_3'],
+  [6, 2, 'medium_real_6_2'],
+  [16, 6, 'medium_real_16_6'],
+] as const
+
+const MEDIUM_PRODUCT_QUESTIONS = [
+  ['lci_vs_cdb', 'Uma LCI isenta não é automaticamente melhor que um CDB tributado porque:', 'É preciso comparar taxa líquida, prazo, liquidez e risco', ['Isenção sempre vence qualquer taxa', 'CDB nunca rende', 'Liquidez não importa']],
+  ['prefixado_queda', 'Se você trava uma taxa prefixada e as taxas de mercado caem depois, o preço do título tende a:', 'Subir, se marcado a mercado', ['Cair sempre', 'Ficar proibido de vender', 'Virar CDI']],
+  ['prefixado_alta', 'Se você compra prefixado longo e as taxas sobem, a venda antecipada tende a:', 'Sofrer perda de preço', ['Gerar ganho automático', 'Ignorar marcação', 'Pagar IPCA extra']],
+  ['cdb_120', 'Um CDB 120% do CDI pode ser ruim se:', 'O risco, prazo ou liquidez não compensarem', ['Todo 120% é golpe', 'CDI não existe', 'Percentual alto elimina risco']],
+  ['fundo_taxa', 'Em fundos, taxa de administração alta afeta:', 'Retorno líquido do cotista', ['Somente o gerente', 'A inflação oficial', 'O limite do cartão']],
+  ['come_cotas', 'Come-cotas em fundos reduz periodicamente:', 'Quantidade de cotas para antecipar IR', ['A taxa Selic', 'O risco de crédito', 'O preço dos alimentos']],
+  ['etf', 'Um ETF amplo pode ajudar por:', 'Dar diversificação operacional em um único produto', ['Garantir lucro', 'Eliminar volatilidade', 'Evitar corretora']],
+  ['dolar', 'Exposição ao dólar pode:', 'Diversificar moeda, mas adiciona risco cambial', ['Remover todo risco', 'Ser igual ao CDI', 'Garantir retorno real']],
+  ['amortizacao', 'Na dívida com juros altos, amortizar principal costuma:', 'Reduzir juros futuros', ['Aumentar CET', 'Criar dividendos', 'Transformar dívida em investimento']],
+  ['prazo_taxa', 'Ao alongar demais uma dívida, você deve observar:', 'Custo total pago, não só parcela menor', ['Só se a parcela cabe hoje', 'A cor do carnê', 'A quantidade de folhas']],
+] as const
+
+const HARD_SCENARIO_QUESTIONS = [
+  ['duration_cupom', 'Entre dois títulos com mesmo indexador e risco, qual tende a ter maior duration?', 'O de prazo mais longo e fluxos mais distantes', ['O de vencimento amanhã', 'O com menor sensibilidade', 'O que não tem preço']],
+  ['convexidade', 'Convexidade em renda fixa ajuda a explicar:', 'Como a sensibilidade do preço muda conforme a taxa muda', ['A garantia do FGC', 'A taxa do cartão', 'A inflação passada apenas']],
+  ['credito_spread', 'Spread de crédito maior normalmente remunera:', 'Risco percebido maior do emissor ou menor liquidez', ['Garantia absoluta', 'Menor risco sempre', 'Imposto menor automaticamente']],
+  ['debenture_liquidez', 'Em crédito privado com baixa liquidez, vender antes pode ser difícil porque:', 'Pode faltar comprador a preço justo', ['O papel deixa de existir', 'IR impede venda', 'CDI congela']],
+  ['correlacao_crise', 'Ativos que parecem diversificados podem cair juntos em crise quando:', 'Compartilham fatores de risco parecidos', ['São de corretoras diferentes', 'Têm nomes longos', 'Pagam em datas diferentes']],
+  ['rebalanceamento', 'Rebalancear carteira serve para:', 'Trazer o risco de volta ao plano definido', ['Comprar sempre o que mais subiu', 'Evitar qualquer queda', 'Aumentar giro sem critério']],
+  ['var', 'VaR tenta estimar:', 'Perda potencial em certo horizonte e confiança', ['Lucro certo', 'Imposto devido', 'Taxa Selic futura garantida']],
+  ['drawdown', 'Drawdown mede:', 'Queda do pico até um vale no patrimônio ou ativo', ['Rendimento mensal fixo', 'Garantia de crédito', 'Liquidez diária']],
+  ['alavancagem', 'Alavancagem aumenta:', 'Potencial de ganho e de perda', ['Só ganho', 'Só liquidez', 'Proteção contra margem']],
+  ['tax_equivalent', 'Para comparar produto isento com tributado, o mais correto é:', 'Converter para taxa líquida equivalente', ['Olhar só taxa bruta', 'Escolher sempre o isento', 'Ignorar prazo']],
+  ['ipca_vencimento', 'Tesouro IPCA+ levado ao vencimento entrega:', 'Inflação do período mais taxa real contratada, antes de custos/impostos aplicáveis', ['CDI garantido', 'Preço sem oscilação diária', 'Retorno de ações']],
+  ['selic_desagio', 'Mesmo Tesouro Selic pode oscilar um pouco por:', 'Ágio/deságio e condições de mercado', ['Ser renda variável pura', 'Não ter liquidez', 'Não ter taxa pós-fixada']],
+  ['fronteira', 'A fronteira eficiente relaciona:', 'Retorno esperado e risco de combinações de carteira', ['Fatura e limite', 'Preço e cupom fiscal', 'Salário e férias']],
+  ['beta', 'Beta de uma ação mede aproximadamente:', 'Sensibilidade ao mercado de referência', ['Dívida líquida pessoal', 'Taxa de custódia', 'Liquidez do Tesouro']],
+  ['tracking_error', 'Tracking error é relevante para avaliar:', 'Quanto uma carteira/fundo se desvia do índice de referência', ['Quanto imposto foi pago', 'Quanto o cartão liberou', 'Quanto a inflação caiu']],
+] as const
+
+function buildBattleQuizGenerated(): BattleQuizQuestion[] {
+  const easyDecision = EASY_DECISION_QUESTIONS.map(([id, prompt, correct, wrongs]) =>
+    battleQuestion(id, 'easy', prompt, correct, wrongs, 'A melhor escolha preserva caixa, reduz custo financeiro ou evita concentração de risco.')
+  )
+  const easyConcept = EASY_CONCEPT_QUESTIONS.map(([id, prompt, correct, wrongs]) =>
+    battleQuestion(id, 'easy', prompt, correct, wrongs, 'Esse conceito ajuda a diferenciar custo, risco, liquidez e retorno.')
+  )
+  const easyProduct = EASY_PRODUCT_QUESTIONS.map(([id, prompt, correct, wrongs]) =>
+    battleQuestion(id, 'easy', prompt, correct, wrongs, 'Produto bom depende de objetivo, prazo, liquidez, risco e custo.')
+  )
+  const mediumNumeric = MEDIUM_NUMERIC_QUESTIONS.map(([ret, inflation, id]) => {
+    const real = ((1 + ret / 100) / (1 + inflation / 100) - 1) * 100
+    return battleQuestion(
+      id,
+      'medium',
+      `Um investimento rendeu ${percent(ret)} e a inflação foi ${percent(inflation)}. Qual é o retorno real aproximado pela fórmula exata?`,
+      `Cerca de ${percent(real)}`,
+      [`${percent(ret - inflation)} exatos por subtração`, `${percent(ret + inflation)}`, `${percent(ret)} sem ajuste`],
+      'Retorno real usa a razão entre retorno nominal e inflação: (1+retorno)/(1+inflação)-1.'
+    )
+  })
+  const mediumProduct = MEDIUM_PRODUCT_QUESTIONS.map(([id, prompt, correct, wrongs]) =>
+    battleQuestion(id, 'medium', prompt, correct, wrongs, 'Comparações financeiras boas usam retorno líquido, risco, prazo e liquidez juntos.')
+  )
+  const mediumCdb = [80, 90, 95, 100, 105, 110, 115, 120, 130, 140].map(cdi =>
+    battleQuestion(
+      `medium_cdb_${cdi}`,
+      'medium',
+      `Um CDB paga ${cdi}% do CDI. O que esse percentual indica antes de impostos e custos?`,
+      `Ele rende uma fração equivalente a ${cdi}% da taxa CDI`,
+      ['Ele sempre supera qualquer produto isento', 'Ele elimina risco de crédito', 'Ele garante retorno real positivo'],
+      'Percentual do CDI é indexador de remuneração; ainda é preciso olhar imposto, prazo, liquidez e risco.'
+    )
+  )
+  const hardScenario = HARD_SCENARIO_QUESTIONS.map(([id, prompt, correct, wrongs]) =>
+    battleQuestion(id, 'hard', prompt, correct, wrongs, 'A análise avançada combina risco de mercado, crédito, liquidez, tributação e comportamento da carteira.')
+  )
+  const hardStress = [10, 15, 20, 25, 30, 35, 40, 45, 50, 60].map(loss =>
+    battleQuestion(
+      `hard_drawdown_${loss}`,
+      'hard',
+      `Uma carteira caiu ${percent(loss)} do topo. Para voltar ao topo anterior, o ganho necessário é:`,
+      `Maior que ${percent(loss)}, pois a base ficou menor`,
+      [`Exatamente ${percent(loss)}`, 'Sempre metade da queda', 'Zero, se esperar um mês'],
+      'Após uma queda, o ganho necessário é calculado sobre uma base menor, então precisa ser maior que a perda percentual.'
+    )
+  )
+  const hardTax = [15, 17.5, 20, 22.5, 10, 12, 18, 25, 27.5, 30].map(tax =>
+    battleQuestion(
+      `hard_tax_liquid_${String(tax).replace('.', '_')}`,
+      'hard',
+      `Um produto tributado rende ${percent(12)} ao ano e paga ${percent(tax)} de imposto sobre o ganho. O que importa na comparação com um produto isento?`,
+      'A rentabilidade líquida depois do imposto',
+      ['A taxa bruta isolada', 'O nome do produto', 'A isenção sem olhar taxa'],
+      'Produto isento só é melhor se a taxa líquida ajustada ao risco, prazo e liquidez compensar.'
+    )
+  )
+  const easyQuota = Array.from({ length: 30 }, (_, index) => {
+    const quota = 100 + index * 15
+    const spent = index % 3 === 0 ? Math.round(quota * 0.72) : index % 3 === 1 ? Math.round(quota * 0.96) : Math.round(quota * 1.18)
+    const under = spent <= quota
+    return battleQuestion(
+      `easy_quota_${index + 1}`,
+      'easy',
+      `A cota planejada do dia era R$ ${quota} e o gasto foi R$ ${spent}. Qual leitura está correta?`,
+      under ? 'O gasto ficou dentro da cota planejada' : 'O gasto passou da cota planejada',
+      under
+        ? ['O gasto passou da cota', 'A cota deixou de existir', 'Isso prova que todo mês fechará positivo']
+        : ['O gasto ficou abaixo da cota', 'Não é preciso revisar nada', 'O excesso vira investimento automático'],
+      'Comparar gasto com cota ajuda a perceber folga ou excesso antes que o ciclo saia do controle.'
+    )
+  })
+  const mediumCet = Array.from({ length: 30 }, (_, index) => {
+    const cetA = 1.8 + index * 0.13
+    const cetB = index % 2 === 0 ? cetA + 0.7 : cetA - 0.45
+    const aIsBetter = cetA < cetB
+    return battleQuestion(
+      `medium_cet_compare_${index + 1}`,
+      'medium',
+      `Dois empréstimos têm mesmo valor e prazo. O A tem CET mensal de ${percent(cetA)} e o B tem CET mensal de ${percent(cetB)}. Qual tende a custar menos?`,
+      aIsBetter ? 'Empréstimo A, pelo menor CET' : 'Empréstimo B, pelo menor CET',
+      aIsBetter
+        ? ['Empréstimo B, porque CET maior ajuda', 'Os dois custam igual sempre', 'O que tiver parcela mais bonita']
+        : ['Empréstimo A, porque CET maior ajuda', 'Os dois custam igual sempre', 'O que tiver propaganda melhor'],
+      'Com mesmo valor e prazo, menor CET tende a indicar menor custo total da operação.'
+    )
+  })
+  const hardDurationCompare = Array.from({ length: 30 }, (_, index) => {
+    const shortYears = 2 + (index % 5)
+    const longYears = shortYears + 4 + (index % 4)
+    return battleQuestion(
+      `hard_duration_compare_${index + 1}`,
+      'hard',
+      `Dois títulos prefixados têm risco parecido. Um vence em ${shortYears} anos e outro em ${longYears} anos. Se a taxa de mercado muda, qual tende a oscilar mais?`,
+      `O título de ${longYears} anos, por ter maior sensibilidade ao prazo`,
+      [`O título de ${shortYears} anos, sempre`, 'Os dois oscilam zero', 'O que tiver menor duration'],
+      'Em geral, prazos mais longos aumentam duration e sensibilidade à variação das taxas.'
+    )
+  })
+
+  return [
+    ...easyDecision,
+    ...easyConcept,
+    ...easyProduct,
+    ...easyQuota,
+    ...mediumNumeric,
+    ...mediumProduct,
+    ...mediumCdb,
+    ...mediumCet,
+    ...hardScenario,
+    ...hardStress,
+    ...hardTax,
+    ...hardDurationCompare,
+  ]
+}
+
+const BATTLE_QUIZ_BANK: BattleQuizQuestion[] = [...BATTLE_QUIZ_BANK_BASE, ...buildBattleQuizGenerated()]
+
+export function drawBattleQuizQuestion(difficulty: BattleQuizDifficulty): BattleQuizQuestion {
+  const options = BATTLE_QUIZ_BANK.filter(question => question.difficulty === difficulty)
+  return options[Math.floor(Math.random() * options.length)] ?? BATTLE_QUIZ_BANK[0]
+}
+
+export function getBattleClassProfile(char: Character): BattleClassCombatProfile {
+  if (char.class === 'mago') return { resourceName: 'Mana', normalAttackName: 'Faísca do Orçamento', strongAttackName: 'Raio do Planejamento', specialAttackName: 'Auditoria Suprema', strongDescription: 'Gasta Mana para causar dano alto e estável.', strongCost: 12, regenPerTurn: 5 }
+  if (char.class === 'ladino') return { resourceName: 'Foco', normalAttackName: 'Corte do Saldo', strongAttackName: 'Punhal da Disciplina', specialAttackName: 'Execução do Impulso', strongDescription: 'Gasta Foco para um golpe forte com maior chance crítica.', strongCost: 10, regenPerTurn: 6 }
+  return { resourceName: 'Estamina', normalAttackName: 'Corte da Reserva', strongAttackName: 'Investida do Cofre', specialAttackName: 'Martelo dos Juros Compostos', strongDescription: 'Gasta Estamina para causar dano pesado.', strongCost: 11, regenPerTurn: 5 }
+}
+
+export function getBattlePlayerTechniques(char: Character): BattlePlayerTechnique[] {
+  if (char.class === 'mago') {
+    return [
+      { id: 'mago_n5', name: 'Selo do Fluxo de Caixa', description: 'Golpe arcano mais forte. Bom quando a Mana está sobrando.', minLevel: 5, resourceCost: 18, damageMult: 2.05, missMod: 0.04, critMod: 0.02 },
+      { id: 'mago_n10', name: 'Tempestade de Planilhas', description: 'Dano alto, custo alto e boa chance crítica.', minLevel: 10, resourceCost: 26, damageMult: 2.7, missMod: 0.06, critMod: 0.04 },
+      { id: 'mago_n15', name: 'Balanço Final', description: 'Técnica pesada para encerrar a luta.', minLevel: 15, resourceCost: 36, damageMult: 3.45, missMod: 0.08, critMod: 0.06 },
+    ]
+  }
+  if (char.class === 'ladino') {
+    return [
+      { id: 'ladino_n5', name: 'Finta da Economia', description: 'Dano forte com boa chance crítica.', minLevel: 5, resourceCost: 16, damageMult: 1.95, missMod: 0.03, critMod: 0.05 },
+      { id: 'ladino_n10', name: 'Combo da Margem', description: 'Sequência agressiva para acelerar vitórias.', minLevel: 10, resourceCost: 24, damageMult: 2.55, missMod: 0.05, critMod: 0.08 },
+      { id: 'ladino_n15', name: 'Roubo do Rotativo', description: 'Golpe extremo, caro e crítico.', minLevel: 15, resourceCost: 34, damageMult: 3.25, missMod: 0.08, critMod: 0.1 },
+    ]
+  }
+  return [
+    { id: 'guerreiro_n5', name: 'Escudo da Reserva', description: 'Ataque pesado e confiável.', minLevel: 5, resourceCost: 17, damageMult: 2, missMod: 0.03, critMod: 0.01 },
+    { id: 'guerreiro_n10', name: 'Carga do Patrimônio', description: 'Causa dano alto usando bastante Estamina.', minLevel: 10, resourceCost: 25, damageMult: 2.65, missMod: 0.05, critMod: 0.03 },
+    { id: 'guerreiro_n15', name: 'Quebra da Dívida', description: 'Golpe final pesado, caro e decisivo.', minLevel: 15, resourceCost: 35, damageMult: 3.35, missMod: 0.07, critMod: 0.05 },
+  ]
+}
+
+function randomInt(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min + 1))
+}
+
+function removeInventoryItem(char: Character, itemId: ConsumableItemId): { character: Character; removed: boolean } {
+  const item = (char.inventory ?? []).find(entry => entry.itemId === itemId)
+  if (!item || item.quantity <= 0) return { character: char, removed: false }
+  return {
+    character: {
+      ...char,
+      inventory: item.quantity <= 1
+        ? (char.inventory ?? []).filter(entry => entry.itemId !== itemId)
+        : (char.inventory ?? []).map(entry => entry.itemId === itemId ? { ...entry, quantity: entry.quantity - 1 } : entry),
+    },
+    removed: true,
+  }
+}
+
+function getEnemyAttacks(monster: BattleMonsterDefinition, level: number, battleNumber: number): BattleEnemyAttack[] {
+  const base = Math.max(1, Math.round(1.8 + level * 0.45 + battleNumber * 0.25))
+  const names: Record<string, [string, string, string]> = {
+    cobrador: ['Cobrança Seca', 'Taxa de Atraso', 'Intimação do Boleto'],
+    fatura_viva: ['Estouro de Limite', 'Parcela Fantasma', 'Anuidade Mordaz'],
+    boleto_rastejante: ['Carimbo Vencido', 'Multa Rasteira', 'Protesto Súbito'],
+    vendedor_impulsivo: ['Oferta Relâmpago', 'Desconto Isca', 'Carrinho Cheio'],
+    agente_dos_juros: ['Juro Composto Sombrio', 'Spread da Névoa', 'Contrato Confuso'],
+    parcelador_sombrio: ['12x Sem Pensar', 'Entrada Pequena', 'Carnê Infinito'],
+    assinatura_fantasma: ['Renovação Silenciosa', 'Plano Esquecido', 'Débito Recorrente'],
+    devorador_de_limite: ['Mordida do Rotativo', 'Avalanche de Parcelas', 'Limite Quebrado'],
+    inflacao_carmesim: ['Preço Reajustado', 'Cesta Ardente', 'Poder de Compra Drenado'],
+    consultor_duvidoso: ['Promessa Garantida', 'Taxa Escondida', 'Carteira Milagrosa'],
+    dragao_do_rotativo: ['Sopro do Rotativo', 'Asa da Inadimplência', 'Chama dos Juros'],
+    especulador_abissal: ['Aposta Alavancada', 'FOMO Abissal', 'Liquidação Forçada'],
+    tirano_da_alavancagem: ['Margem Chamando', 'Contrato Pesado', 'Efeito Dominó'],
+    colosso_do_drawdown: ['Queda Profunda', 'Pânico de Mercado', 'Venda no Fundo'],
+    oraculo_da_volatilidade: ['Oscilação Súbita', 'Ruído do Mercado', 'Profecia Instável'],
+  }
+  const [normal, strong, special] = names[monster.id] ?? names.cobrador
+  return [
+    { id: 'normal', name: normal, description: 'Ataque básico. Baixo custo, dano moderado.', resourceCost: 0, minDamage: Math.max(1, Math.round(base * monster.powerMult)), maxDamage: Math.max(2, Math.round((base + 2) * monster.powerMult)), missChance: Math.max(0.1, 0.18 + monster.missMod), critChance: 0.06 + monster.critMod },
+    { id: 'strong', name: strong, description: 'Consome recurso do inimigo para causar mais dano.', resourceCost: 9, minDamage: Math.max(2, Math.round((base + 2) * monster.powerMult)), maxDamage: Math.max(3, Math.round((base + 5) * monster.powerMult)), missChance: Math.max(0.12, 0.23 + monster.missMod), critChance: 0.1 + monster.critMod },
+    { id: 'special', name: special, description: 'Golpe raro quando o inimigo acumula recurso suficiente.', resourceCost: 18, minDamage: Math.max(3, Math.round((base + 5) * monster.powerMult)), maxDamage: Math.max(5, Math.round((base + 9) * monster.powerMult)), missChance: Math.max(0.15, 0.28 + monster.missMod), critChance: 0.13 + monster.critMod },
+  ]
+}
+
+function battleAttackPower(char: Character): number {
+  const attrs = calcEffectiveAttributes(char)
+  return Math.max(6, Math.round(char.level * 3.4 + attrs.vigor * 1.35 + attrs.disciplina * 1.3 + attrs.sabedoria * 1.25 + attrs.prosperidade))
+}
+
+function battleResourceMax(char: Character): number {
+  const attrs = calcEffectiveAttributes(char)
+  if (char.class === 'mago') return 24 + char.level * 2 + attrs.sabedoria * 2 + attrs.disciplina
+  if (char.class === 'ladino') return 22 + char.level * 2 + attrs.disciplina * 2 + attrs.sabedoria
+  return 26 + char.level * 2 + attrs.vigor * 2 + attrs.resiliencia
+}
+
+function addBattleRound(battle: ActiveBattleState, round: BattleRound): ActiveBattleState {
+  return { ...battle, rounds: [...battle.rounds, round] }
+}
+
+function finishInteractiveBattle(char: Character, battle: ActiveBattleState): BattleTurnResult {
+  let current = normalizeCharacter(char)
+  const won = battle.monsterHp <= 0
+  if (won) {
+    const monster = BATTLE_MONSTERS.find(item => item.id === battle.monsterId) ?? BATTLE_MONSTERS[0]
+    const attrs = calcEffectiveAttributes(current)
+    const baseXP = 18 + monster.xpBonus
+    const levelXP = current.level * 4
+    const sabedoriaXP = Math.round(attrs.sabedoria * 1.5)
+    const xpGained = Math.round(baseXP + levelXP + sabedoriaXP)
+    const xpBreakdown: XPBreakdownLine[] = [
+      { label: 'XP da vitória', value: baseXP, kind: 'base' },
+      { label: 'Bônus de nível', value: levelXP, detail: `Nível ${current.level} x 4`, kind: 'level' },
+    ]
+    if (sabedoriaXP > 0) xpBreakdown.push({ label: 'Bônus de Sabedoria', value: sabedoriaXP, detail: `${attrs.sabedoria} Sabedoria`, kind: 'attribute' })
+    let goldGained = 0
+    let itemGained: ConsumableItemId | undefined
+    const lootRoll = Math.random()
+    if (lootRoll > 0.72) goldGained = Math.round(12 + current.level * 4 + attrs.prosperidade * 3 + monster.goldBonus)
+    else if (lootRoll > 0.52) {
+      itemGained = Math.random() > 0.78 ? 'pocao_grande' : 'pocao_pequena'
+      current = addInventoryItem(current, itemGained, 1)
+    }
+    current = applyLevelUp({ ...current, goldChest: (current.goldChest ?? 0) + goldGained }, xpGained)
+    const result: BattleResult = { character: current, won: true, message: `${current.name} venceu a batalha contra um ${battle.monsterName}.`, xpGained, damageTaken: 0, goldGained, monsterName: battle.monsterName, playerBattleHpStart: battle.playerBattleHpStart, playerBattleHpEnd: battle.playerHp, monsterHpStart: battle.monsterHpStart, monsterHpEnd: battle.monsterHp, rounds: battle.rounds, xpBreakdown, itemGained }
+    return { character: current, battle: { ...battle, finished: true, won: true, result }, message: result.message, result }
+  }
+
+  const reduced = battle.defeatDamage
+  const lossXp = Math.max(3, Math.round(current.level * 1.5))
+  const lossXpBreakdown: XPBreakdownLine[] = [{ label: 'XP de sobrevivência', value: lossXp, detail: `Baseado no nível ${current.level}`, kind: 'level' }]
+  const lifeAfterDamage = current.life - reduced
+  current = applyLevelUp({ ...current, life: Math.max(0, lifeAfterDamage) }, lossXp)
+  if (lifeAfterDamage <= 0) {
+    current = appendEventLog(handleDeath(current), { type: 'death', date: new Date().toISOString(), message: `${char.name} caiu em batalha contra ${battle.monsterName}. Voltou ao nível 1; itens e equipamentos foram perdidos, mas o Baú foi preservado.`, damage: reduced, lifeAfter: 0 })
+  } else if (reduced > 0) {
+    current = appendEventLog(current, { type: 'damage', date: new Date().toISOString(), message: `${current.name} sofreu ${reduced} de dano real ao perder uma batalha contra ${battle.monsterName}.`, damage: reduced, lifeAfter: current.life })
+  }
+  const result: BattleResult = { character: current, won: false, message: lifeAfterDamage <= 0 ? `${char.name} caiu em batalha contra ${battle.monsterName}.` : `${current.name} perdeu a batalha e recuou antes de cair.`, xpGained: lossXp, damageTaken: reduced, goldGained: 0, monsterName: battle.monsterName, playerBattleHpStart: battle.playerBattleHpStart, playerBattleHpEnd: battle.playerHp, monsterHpStart: battle.monsterHpStart, monsterHpEnd: battle.monsterHp, rounds: battle.rounds, xpBreakdown: lossXpBreakdown, died: lifeAfterDamage <= 0 }
+  return { character: current, battle: { ...battle, finished: true, won: false, result }, message: result.message, result }
+}
+
+export function startInteractiveBattle(char: Character, now = new Date()): StartBattleResult {
+  let current = normalizeCharacter(char)
+  if (current.life <= 0) return { character: current, ok: false, message: 'Sem vida para lutar agora.' }
+  const charged = consumeBattleCharge(current, now)
+  current = charged.character
+  if (!charged.ok) return { character: current, ok: false, message: charged.message ?? 'A arena ainda está recuperando energia.' }
+  const battleNumber = battlesToday(current)
+  const monster = chooseBattleMonster(current, battleNumber)
+  const attrs = calcEffectiveAttributes(current)
+  const playerBattleHpStart = Math.max(18 + current.level * 4, current.life + current.level * 4 + attrs.vigor * 2 + attrs.resiliencia)
+  const monsterHpStart = Math.round((16 + current.level * 5 + battleNumber * 3) * monster.hpMult)
+  const playerResourceMax = battleResourceMax(current)
+  const enemyResourceMax = 18 + current.level * 2 + battleNumber
+  const battle: ActiveBattleState = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    monsterId: monster.id,
+    monsterName: monster.name,
+    playerBattleHpStart,
+    playerHp: playerBattleHpStart,
+    monsterHpStart,
+    monsterHp: monsterHpStart,
+    playerResource: playerResourceMax,
+    playerResourceMax,
+    playerSpecial: 0,
+    playerSpecialMax: 100,
+    enemyResource: Math.round(enemyResourceMax * 0.25),
+    enemyResourceMax,
+    turn: 1,
+    battleNumber,
+    defeatDamage: maxBattleDamageOnDefeat(current),
+    playerTechniques: getBattlePlayerTechniques(current),
+    enemyAttacks: getEnemyAttacks(monster, current.level, battleNumber),
+    classProfile: getBattleClassProfile(current),
+    rounds: [{ turn: 1, actor: 'system', result: 'hit', damage: 0, playerHp: playerBattleHpStart, monsterHp: monsterHpStart, text: `${monster.name} entrou na arena. Escolha cada turno: ataque, item, golpe forte ou carregue o especial com conhecimento financeiro.` }],
+  }
+  current = incrementBattleCount(current)
+  return { character: current, ok: true, message: 'Batalha iniciada. Uma carga da arena foi consumida.', battle }
+}
+
+function enemyTurn(char: Character, battle: ActiveBattleState): ActiveBattleState {
+  if (battle.monsterHp <= 0 || battle.playerHp <= 0) return battle
+  const attrs = calcEffectiveAttributes(char)
+  const available = battle.enemyAttacks.filter(attack => attack.resourceCost <= battle.enemyResource)
+  const attack = available.at(-1) ?? battle.enemyAttacks[0]
+  let next = { ...battle, enemyResource: Math.max(0, battle.enemyResource - attack.resourceCost) }
+  const dodgeBonus = Math.min(0.16, attrs.resiliencia * 0.008 + attrs.disciplina * 0.004)
+  const roll = Math.random()
+  if (roll < attack.missChance + dodgeBonus) {
+    next = addBattleRound(next, { turn: battle.turn, actor: 'monster', result: 'miss', damage: 0, playerHp: next.playerHp, monsterHp: next.monsterHp, text: `${battle.monsterName} usou ${attack.name}, mas você escapou.` })
+  } else {
+    const critical = roll > 1 - attack.critChance
+    const baseDamage = randomInt(attack.minDamage, attack.maxDamage)
+    const damage = critical ? Math.round(baseDamage * 1.55) : baseDamage
+    next = { ...next, playerHp: Math.max(0, next.playerHp - damage) }
+    next = addBattleRound(next, { turn: battle.turn, actor: 'monster', result: critical ? 'critical' : 'hit', damage, playerHp: next.playerHp, monsterHp: next.monsterHp, text: critical ? `${battle.monsterName} acertou ${attack.name} em cheio e causou ${damage} de dano.` : `${battle.monsterName} usou ${attack.name} e causou ${damage} de dano.` })
+  }
+  return { ...next, enemyResource: Math.min(next.enemyResourceMax, next.enemyResource + 4), playerResource: Math.min(next.playerResourceMax, next.playerResource + next.classProfile.regenPerTurn), turn: next.turn + 1 }
+}
+
+export function performBattleTurn(char: Character, battle: ActiveBattleState, action: { type: 'attack' | 'strong' | 'special' | 'technique' | 'item'; itemId?: ConsumableItemId; techniqueId?: string }): BattleTurnResult {
+  let current = normalizeCharacter(char)
+  if (battle.finished) return { character: current, battle, message: battle.result?.message ?? 'A batalha já terminou.', result: battle.result }
+  let next = { ...battle }
+  const attrs = calcEffectiveAttributes(current)
+  const attackBase = battleAttackPower(current)
+  const playerMissChance = Math.max(0.05, 0.19 - attrs.disciplina * 0.008)
+  const playerCritChance = Math.min(0.34, 0.08 + attrs.sabedoria * 0.012 + attrs.prosperidade * 0.006 + (current.class === 'ladino' ? 0.04 : 0))
+
+  if (action.type === 'item') {
+    const itemId = action.itemId ?? 'pocao_pequena'
+    const removed = removeInventoryItem(current, itemId)
+    if (!removed.removed) return { character: current, battle, message: 'Você não tem essa poção no inventário.' }
+    current = removed.character
+    const heal = CONSUMABLE_ITEMS[itemId].heal
+    next = { ...next, playerHp: Math.min(next.playerBattleHpStart, next.playerHp + heal) }
+    next = addBattleRound(next, { turn: next.turn, actor: 'player', result: 'hit', damage: 0, playerHp: next.playerHp, monsterHp: next.monsterHp, text: `${current.name} usou ${CONSUMABLE_ITEMS[itemId].name}. O item saiu do inventário real e recuperou ${heal} de vida de batalha.` })
+  } else {
+    const isStrong = action.type === 'strong'
+    const isSpecial = action.type === 'special'
+    const technique = action.type === 'technique' ? next.playerTechniques.find(item => item.id === action.techniqueId) : undefined
+    if (action.type === 'technique' && !technique) return { character: current, battle, message: 'Técnica indisponível.' }
+    if (technique && current.level < technique.minLevel) return { character: current, battle, message: `Essa técnica libera no nível ${technique.minLevel}.` }
+    const cost = technique ? technique.resourceCost : isStrong || isSpecial ? next.classProfile.strongCost : 0
+    if ((isStrong || isSpecial || technique) && next.playerResource < cost) return { character: current, battle, message: `${next.classProfile.resourceName} insuficiente para esse golpe.` }
+    if (isSpecial && next.playerSpecial < next.playerSpecialMax) return { character: current, battle, message: 'A barra de especial ainda não está cheia.' }
+    next = { ...next, playerResource: Math.max(0, next.playerResource - cost), playerSpecial: isSpecial ? 0 : next.playerSpecial }
+    const roll = Math.random()
+    const attackName = technique?.name ?? (isSpecial ? next.classProfile.specialAttackName : isStrong ? next.classProfile.strongAttackName : next.classProfile.normalAttackName)
+    if (roll < playerMissChance + (technique?.missMod ?? 0) + (isStrong ? 0.03 : 0) + (isSpecial ? 0.02 : 0)) {
+      next = addBattleRound(next, { turn: next.turn, actor: 'player', result: 'miss', damage: 0, playerHp: next.playerHp, monsterHp: next.monsterHp, text: `${current.name} tentou ${attackName}, mas errou.` })
+    } else {
+      const critical = roll > 1 - Math.min(0.5, playerCritChance + (technique?.critMod ?? 0))
+      const multiplier = technique?.damageMult ?? (isSpecial ? 3.2 : isStrong ? 1.6 : 1)
+      const baseDamage = Math.max(2, Math.round(attackBase * multiplier + randomInt(0, 3 + current.level)))
+      const damage = critical ? Math.round(baseDamage * 1.75) : baseDamage
+      next = { ...next, monsterHp: Math.max(0, next.monsterHp - damage) }
+      next = addBattleRound(next, { turn: next.turn, actor: 'player', result: critical ? 'critical' : 'hit', damage, playerHp: next.playerHp, monsterHp: next.monsterHp, text: critical ? `Crítico! ${current.name} usou ${attackName} e causou ${damage} de dano.` : `${current.name} usou ${attackName} e causou ${damage} de dano.` })
+    }
+  }
+
+  if (next.monsterHp <= 0) return finishInteractiveBattle(current, next)
+  next = enemyTurn(current, next)
+  if (next.playerHp <= 0) return finishInteractiveBattle(current, next)
+  return { character: current, battle: next, message: 'Turno resolvido.' }
+}
+
+export function answerBattleQuiz(char: Character, battle: ActiveBattleState, question: BattleQuizQuestion, optionIndex: number): BattleQuizAnswerResult {
+  const current = normalizeCharacter(char)
+  if (battle.finished) return { character: current, battle, correct: false, chargeGained: 0, message: 'A batalha já terminou.', result: battle.result }
+  const correct = optionIndex === question.correctIndex
+  const ranges: Record<BattleQuizDifficulty, [number, number]> = { easy: [16, 25], medium: [28, 42], hard: [45, 65] }
+  const chargeGained = correct ? randomInt(...ranges[question.difficulty]) : 0
+  let next = { ...battle, playerSpecial: Math.min(battle.playerSpecialMax, battle.playerSpecial + chargeGained) }
+  next = addBattleRound(next, { turn: next.turn, actor: 'player', result: correct ? 'critical' : 'miss', damage: 0, playerHp: next.playerHp, monsterHp: next.monsterHp, text: correct ? `Resposta certa: ${question.explanation} Especial +${chargeGained}.` : `Resposta errada: ${question.explanation} O especial não carregou.` })
+  next = enemyTurn(current, next)
+  if (next.playerHp <= 0) {
+    const finished = finishInteractiveBattle(current, next)
+    return { character: finished.character, battle: finished.battle, correct, chargeGained, message: finished.message, result: finished.result }
+  }
+  return { character: current, battle: next, correct, chargeGained, message: correct ? `Especial carregou +${chargeGained}.` : 'A resposta não carregou o especial.' }
+}
+
 export function performBattle(char: Character): BattleResult {
   let current = normalizeCharacter(char)
   const battleNumber = battlesToday(current)
   const monster = chooseBattleMonster(current, battleNumber)
   const monsterName = monster.name
-  if (battlesToday(current) >= 3) {
+  const charged = consumeBattleCharge(current)
+  current = charged.character
+  if (!charged.ok) {
     return {
       character: current,
       won: false,
-      message: 'Limite diário atingido. Volte amanhã para lutar de novo.',
+      message: charged.message ?? 'A energia da arena acabou. Volte quando uma carga regenerar.',
       xpGained: 0,
       damageTaken: 0,
       goldGained: 0,

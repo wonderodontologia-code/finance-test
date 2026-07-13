@@ -79,6 +79,11 @@ export interface BattleLog {
   count: number
 }
 
+export interface BattleCharges {
+  current: number
+  updatedAt: string
+}
+
 export interface CheckinReward {
   type: CheckinRewardType
   label: string
@@ -209,6 +214,7 @@ export interface Character {
   inventory: InventoryItem[]
   equipmentLevels: EquipmentLevels
   battleLog: BattleLog[]
+  battleCharges?: BattleCharges
   dailyMissions?: DailyMissionProgress
   weeklyContracts?: WeeklyContractProgress
   equippedTitleId?: TitleId
@@ -740,6 +746,7 @@ export function normalizeCharacter(character: Character): Character {
     inventory: character.inventory ?? [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS, ...(character.equipmentLevels ?? {}) },
     battleLog: character.battleLog ?? [],
+    battleCharges: character.battleCharges,
     dailyMissions: character.dailyMissions,
     weeklyContracts: character.weeklyContracts,
     equippedTitleId: character.equippedTitleId,
@@ -904,6 +911,7 @@ export function createCharacter(params: {
     inventory: [],
     equipmentLevels: { ...DEFAULT_EQUIPMENT_LEVELS },
     battleLog: [],
+    battleCharges: undefined,
     dailyMissions: undefined,
     weeklyContracts: undefined,
     equippedTitleId: undefined,

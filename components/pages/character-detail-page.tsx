@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, Circle, Crown, Home, Lock, MapPin, Pencil, Search, ScrollText, ShieldCheck, Sparkles, Target, Trash2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Crown, Home, Lock, MapPin, Pencil, Search, ScrollText, ShieldCheck, Sparkles, Target, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   type Character,
@@ -43,10 +43,14 @@ import {
 } from '@/lib/types'
 import { dateToISO } from '@/lib/date'
 import {
+  type ActiveBattleState,
+  type BattleQuizDifficulty,
+  type BattleQuizQuestion,
   type BattleResult,
   type CheckinResult,
   CHECKIN_ACTION_NAME,
   CHECKIN_COOLDOWN_HOURS,
+  answerBattleQuiz,
   completeDailyMission,
   battlesToday,
   buyConsumable,
@@ -62,14 +66,17 @@ import {
   getCycleGoals,
   calcBossRisk,
   getDailyMissions,
+  getBattleCharges,
   getFinancialEvents,
   getNextActions,
   getTitleViews,
   getWeeklyContracts,
   explorationProgress,
   maxBattleDamageOnDefeat,
-  performBattle,
+  drawBattleQuizQuestion,
+  performBattleTurn,
   performCheckin,
+  startInteractiveBattle,
   startExploration,
   syncExplorationConsistency,
   updateJourneyMarker,
@@ -188,8 +195,76 @@ function XPBreakdown({ lines }: { lines?: XPBreakdownLine[] }) {
 type LootResult =
   | { kind: 'checkin'; title: string; message: string; reward: CheckinReward; missionMessage?: string }
   | { kind: 'exploration'; title: string; message: string; reward: ExplorationReward }
+  | { kind: 'battle'; title: string; message: string; battle: BattleResult }
 
 function LootResultModal({ result, onClose }: { result: LootResult; onClose: () => void }) {
+  if (result.kind === 'battle') {
+    const imageSrc = result.battle.itemGained
+      ? CONSUMABLE_ITEMS[result.battle.itemGained].imageSrc
+      : result.battle.goldGained > 0
+        ? GOLD_REWARD_IMAGE_SRC
+        : XP_REWARD_IMAGE_SRC
+    const rewardLabel = result.battle.won ? 'Vitória na arena' : 'Sobreviveu à batalha'
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-4 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true">
+        <div className="dungeon-panel gold-frame max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-primary/45 bg-card p-5 shadow-2xl">
+          <div className="flex items-center gap-4">
+            <img
+              src={imageSrc}
+              alt=""
+              className="size-20 rounded border border-primary/35 object-cover"
+              style={{ imageRendering: 'pixelated' }}
+            />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">{result.title}</p>
+              <h3 className="font-bold text-foreground">{rewardLabel}</h3>
+              <p className="text-sm font-semibold text-secondary">{result.battle.monsterName}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-2 text-sm">
+            {result.battle.xpGained > 0 && (
+              <div className="rounded border border-border bg-black/35 p-3">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">XP recebido</span>
+                  <span className="font-bold text-secondary">+{result.battle.xpGained}</span>
+                </div>
+                <XPBreakdown lines={result.battle.xpBreakdown} />
+              </div>
+            )}
+            {result.battle.goldGained > 0 && (
+              <div className="rounded border border-primary/30 bg-primary/10 p-3">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Ouro no Baú</span>
+                  <span className="font-bold text-primary">+R$ {result.battle.goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            )}
+            {result.battle.itemGained && (
+              <div className="rounded border border-primary/30 bg-primary/10 p-3 text-primary font-semibold">
+                Item encontrado: {CONSUMABLE_ITEMS[result.battle.itemGained].name}.
+              </div>
+            )}
+            {result.battle.damageTaken > 0 && (
+              <div className="rounded border border-destructive/30 bg-destructive/10 p-3">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Dano real sofrido</span>
+                  <span className="font-bold text-destructive">-{result.battle.damageTaken} vida</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <p className="mt-4 text-sm text-muted-foreground">{result.message}</p>
+          <Button onClick={onClose} className="mt-5 w-full py-3 text-base font-semibold">
+            Continuar
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   const isCheckin = result.kind === 'checkin'
   const rewardLabel = isCheckin ? rewardTitle(result.reward) : explorationRewardTitle(result.reward)
   return (
@@ -277,6 +352,13 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const [showNextEvolution, setShowNextEvolution] = useState(false)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [lastBattle, setLastBattle] = useState<BattleResult | null>(null)
+  const [activeBattle, setActiveBattle] = useState<ActiveBattleState | null>(null)
+  const [battleQuiz, setBattleQuiz] = useState<BattleQuizQuestion | null>(null)
+  const [visibleActiveBattleRounds, setVisibleActiveBattleRounds] = useState(0)
+  const [pendingBattleResult, setPendingBattleResult] = useState<BattleResult | null>(null)
+  const [advancedActionsOpen, setAdvancedActionsOpen] = useState(false)
+  const [advancedActionPage, setAdvancedActionPage] = useState(0)
+  const [enemyAttacksOpen, setEnemyAttacksOpen] = useState(false)
   const [lastCheckin, setLastCheckin] = useState<CheckinResult | null>(null)
   const [lootResult, setLootResult] = useState<LootResult | null>(null)
   const [selectedLocationId, setSelectedLocationId] = useState<ExplorationLocationId | null>(null)
@@ -286,6 +368,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [editingNextCycleTarget, setEditingNextCycleTarget] = useState(false)
   const [nextCycleTargetValue, setNextCycleTargetValue] = useState(String(character.nextCycleMaxTreasure ?? character.maxTreasure))
+  const battleLogRef = useRef<HTMLDivElement | null>(null)
 
   const classDef = CLASSES.find(c => c.id === character.class)!
   const currentClassImage = classImageForLevel(classDef, character.level)
@@ -293,6 +376,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const effectiveAttributes = calcEffectiveAttributes(character)
   const equipmentAttributes = calcEquipmentAttributes(character)
   const battleCount = battlesToday(character)
+  const battleCharges = getBattleCharges(character, new Date(nowTick))
   const maxBattleLoss = maxBattleDamageOnDefeat(character)
   const checkinReady = canCheckin(character, new Date(nowTick))
   const checkinRemaining = checkinTimeRemaining(character, new Date(nowTick))
@@ -418,6 +502,23 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   }, [battleScreenOpen, lastBattle, visibleBattleRounds])
 
   useEffect(() => {
+    if (!battleScreenOpen || !activeBattle) return
+    if (visibleActiveBattleRounds >= activeBattle.rounds.length) return
+
+    const timer = window.setTimeout(() => {
+      setVisibleActiveBattleRounds(count => Math.min(count + 1, activeBattle.rounds.length))
+    }, visibleActiveBattleRounds === 0 ? 200 : 850)
+
+    return () => window.clearTimeout(timer)
+  }, [activeBattle, battleScreenOpen, visibleActiveBattleRounds])
+
+  useEffect(() => {
+    const node = battleLogRef.current
+    if (!node) return
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' })
+  }, [activeBattle?.id, visibleActiveBattleRounds])
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNowTick(Date.now()), 30000)
     return () => window.clearInterval(timer)
   }, [])
@@ -435,6 +536,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     onUpdateCharacter(mission.character, { deferLevelUp: Boolean(result.reward) })
     setLastCheckin(result)
     setLastBattle(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
     if (result.reward) {
       setLootResult({
@@ -458,6 +562,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     setActionMessage(result.message)
     setLastBattle(null)
     setLastCheckin(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
     setNowTick(Date.now())
   }
@@ -468,6 +575,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     setActionMessage(result.reward ? `${result.message} ${explorationRewardTitle(result.reward)}: ${result.reward.label}. +${result.reward.xpGained} XP.` : result.message)
     setLastBattle(null)
     setLastCheckin(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
     if (result.reward) {
       setLootResult({
@@ -481,22 +591,68 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   }
 
   const handleBattle = () => {
-    const result = performBattle(character)
-    const mission = result.rounds.length > 0 && !result.died ? completeMissionIfActive(result.character, 'battle') : { character: result.character, awardedXP: 0 }
-    onUpdateCharacter(mission.character, { deferLevelUp: result.rounds.length > 0 })
-    setLastBattle(result)
-    setVisibleBattleRounds(0)
-    setBattleScreenOpen(result.rounds.length > 0)
-    const loot = [
-      result.xpGained > 0 ? `+${result.xpGained} XP` : '',
-      result.goldGained > 0 ? `+R$ ${result.goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} no Baú` : '',
-      result.itemGained ? `Item: ${CONSUMABLE_ITEMS[result.itemGained].name}` : '',
-      result.damageTaken > 0 ? `-${result.damageTaken} vida` : '',
-    ].filter(Boolean).join(' · ')
-    setActionMessage([
-      `${result.message}${loot ? ` ${loot}` : ''}`,
-      mission.awardedXP > 0 ? mission.message : '',
-    ].filter(Boolean).join(' '))
+    const result = startInteractiveBattle(character, new Date(nowTick))
+    onUpdateCharacter(result.character)
+    setActionMessage(result.message)
+    setLastBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
+    setAdvancedActionsOpen(false)
+    setAdvancedActionPage(0)
+    setEnemyAttacksOpen(false)
+    if (result.battle) {
+      setActiveBattle(result.battle)
+      setVisibleActiveBattleRounds(1)
+      setBattleScreenOpen(true)
+    }
+  }
+
+  const finishBattleTurn = (result: { character: Character; battle: ActiveBattleState; message: string; result?: BattleResult }) => {
+    if (result.result) {
+      const mission = result.result.rounds.length > 0 && !result.result.died
+        ? completeMissionIfActive(result.character, 'battle')
+        : { character: result.character, awardedXP: 0 }
+      onUpdateCharacter(mission.character, { deferLevelUp: result.result.rounds.length > 0 })
+      setActiveBattle(result.battle)
+      setPendingBattleResult(result.result)
+      setLastBattle(result.result)
+      setBattleQuiz(null)
+      setVisibleActiveBattleRounds(count => Math.min(count + 1, result.battle.rounds.length))
+      const loot = [
+        result.result.xpGained > 0 ? `+${result.result.xpGained} XP` : '',
+        result.result.goldGained > 0 ? `+R$ ${result.result.goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} no Baú` : '',
+        result.result.itemGained ? `Item: ${CONSUMABLE_ITEMS[result.result.itemGained].name}` : '',
+        result.result.damageTaken > 0 ? `-${result.result.damageTaken} vida` : '',
+      ].filter(Boolean).join(' · ')
+      setActionMessage([
+        `${result.result.message}${loot ? ` ${loot}` : ''}`,
+        mission.awardedXP > 0 ? mission.message : '',
+      ].filter(Boolean).join(' '))
+      return
+    }
+    onUpdateCharacter(result.character)
+    setActiveBattle(result.battle)
+    setVisibleActiveBattleRounds(count => Math.min(count + 1, result.battle.rounds.length))
+    setActionMessage(result.message)
+  }
+
+  const handleBattleAction = (type: 'attack' | 'strong' | 'special' | 'technique' | 'item', itemId?: ConsumableItemId, techniqueId?: string) => {
+    if (!activeBattle) return
+    if (visibleActiveBattleRounds < activeBattle.rounds.length || pendingBattleResult) return
+    finishBattleTurn(performBattleTurn(character, activeBattle, { type, itemId, techniqueId }))
+  }
+
+  const handleDrawBattleQuiz = (difficulty: BattleQuizDifficulty) => {
+    if (activeBattle && visibleActiveBattleRounds < activeBattle.rounds.length) return
+    setBattleQuiz(drawBattleQuizQuestion(difficulty))
+  }
+
+  const handleAnswerBattleQuiz = (optionIndex: number) => {
+    if (!activeBattle || !battleQuiz) return
+    if (visibleActiveBattleRounds < activeBattle.rounds.length || pendingBattleResult) return
+    const result = answerBattleQuiz(character, activeBattle, battleQuiz, optionIndex)
+    finishBattleTurn(result)
+    setBattleQuiz(null)
   }
 
   const handleBuyConsumable = (itemId: ConsumableItemId) => {
@@ -506,6 +662,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     onUpdateCharacter(mission.character)
     setActionMessage([result.message, mission.awardedXP > 0 ? mission.message : ''].filter(Boolean).join(' '))
     setLastBattle(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
   }
 
@@ -514,6 +673,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     onUpdateCharacter(result.character)
     setActionMessage(result.message)
     setLastBattle(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
   }
 
@@ -524,6 +686,9 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     onUpdateCharacter(mission.character)
     setActionMessage([result.message, mission.awardedXP > 0 ? mission.message : ''].filter(Boolean).join(' '))
     setLastBattle(null)
+    setActiveBattle(null)
+    setBattleQuiz(null)
+    setPendingBattleResult(null)
     setBattleScreenOpen(false)
   }
 
@@ -537,6 +702,341 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     const result = equipTitle(character, titleId)
     onUpdateCharacter(result.character)
     setActionMessage(result.message)
+  }
+
+  if (battleScreenOpen && activeBattle) {
+    const potionItems = (character.inventory ?? []).filter(item => item.quantity > 0 && CONSUMABLE_ITEMS[item.itemId])
+    const visibleRounds = activeBattle.rounds.slice(0, visibleActiveBattleRounds)
+    const currentRound = visibleRounds.at(-1)
+    const shownPlayerHp = currentRound?.playerHp ?? activeBattle.playerBattleHpStart
+    const shownMonsterHp = currentRound?.monsterHp ?? activeBattle.monsterHpStart
+    const battleAnimating = visibleActiveBattleRounds < activeBattle.rounds.length
+    const battleResultReady = pendingBattleResult && !battleAnimating
+    const actionLocked = battleAnimating || Boolean(battleResultReady)
+    const canUseSpecial = activeBattle.playerSpecial >= activeBattle.playerSpecialMax && activeBattle.playerResource >= activeBattle.classProfile.strongCost
+    const techniquePageSize = 1
+    const techniquePageCount = Math.max(1, Math.ceil(activeBattle.playerTechniques.length / techniquePageSize))
+    const techniquePage = Math.min(advancedActionPage, techniquePageCount - 1)
+    const visibleTechniques = activeBattle.playerTechniques.slice(techniquePage * techniquePageSize, techniquePage * techniquePageSize + techniquePageSize)
+    const currentEventTitle = currentRound
+      ? currentRound.actor === 'monster' && currentRound.result === 'hit'
+        ? `Tomou ${currentRound.damage} de dano`
+        : currentRound.actor === 'monster' && currentRound.result === 'critical'
+          ? `Crítico inimigo: -${currentRound.damage}`
+          : currentRound.actor === 'monster' && currentRound.result === 'miss'
+            ? 'Você desviou'
+            : currentRound.actor === 'player' && currentRound.result === 'critical'
+              ? `Acerto crítico: ${currentRound.damage}`
+              : currentRound.actor === 'player' && currentRound.result === 'hit' && currentRound.damage > 0
+                ? `Acertou: ${currentRound.damage}`
+                : currentRound.actor === 'player' && currentRound.result === 'hit'
+                  ? 'Ação usada'
+                  : currentRound.actor === 'player' && currentRound.result === 'miss'
+                    ? 'Você errou'
+                    : 'Batalha iniciada'
+      : 'Batalha iniciada'
+    const currentEventTone = currentRound?.actor === 'monster'
+      ? currentRound.result === 'miss' ? 'border-primary/35 bg-primary/10 text-primary' : 'border-destructive/35 bg-destructive/10 text-destructive'
+      : currentRound?.result === 'miss'
+        ? 'border-border bg-black/35 text-muted-foreground'
+        : 'border-primary/35 bg-primary/10 text-primary'
+
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="bg-black/75 border-b border-primary/25 sticky top-0 z-10 backdrop-blur">
+          <div className="max-w-xl mx-auto px-3 py-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">Arena da Masmorra</p>
+              <h1 className="font-bold text-foreground text-sm">{character.name} vs {activeBattle.monsterName}</h1>
+            </div>
+            <span className="text-xs font-bold text-muted-foreground">Turno {activeBattle.turn}</span>
+          </div>
+        </header>
+
+        <main className="max-w-xl mx-auto px-3 py-3 space-y-2">
+          <section className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Sua vida</span>
+                  <span className="text-foreground font-semibold">{shownPlayerHp}/{activeBattle.playerBattleHpStart}</span>
+                </div>
+                <ProgressBar value={shownPlayerHp} max={activeBattle.playerBattleHpStart} colorClass={shownPlayerHp <= 0 ? 'bg-destructive' : 'bg-primary'} />
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{activeBattle.classProfile.resourceName}</span>
+                  <span className="text-foreground font-semibold">{activeBattle.playerResource}/{activeBattle.playerResourceMax}</span>
+                </div>
+                <ProgressBar value={activeBattle.playerResource} max={activeBattle.playerResourceMax} colorClass="bg-secondary" />
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Especial</span>
+                  <span className="text-foreground font-semibold">{activeBattle.playerSpecial}/{activeBattle.playerSpecialMax}</span>
+                </div>
+                <ProgressBar value={activeBattle.playerSpecial} max={activeBattle.playerSpecialMax} colorClass="bg-accent" />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{activeBattle.monsterName}</span>
+                  <span className="text-foreground font-semibold">{shownMonsterHp}/{activeBattle.monsterHpStart}</span>
+                </div>
+                <ProgressBar value={shownMonsterHp} max={activeBattle.monsterHpStart} colorClass={shownMonsterHp <= 0 ? 'bg-destructive' : 'bg-destructive'} />
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Ímpeto inimigo</span>
+                  <span className="text-foreground font-semibold">{activeBattle.enemyResource}/{activeBattle.enemyResourceMax}</span>
+                </div>
+                <ProgressBar value={activeBattle.enemyResource} max={activeBattle.enemyResourceMax} colorClass="bg-muted-foreground" />
+                <div className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-muted-foreground">
+                  Derrota: <span className="font-bold text-destructive">-{activeBattle.defeatDamage} vida real</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnemyAttacksOpen(open => !open)}
+              className="mt-2 flex w-full items-center justify-between rounded border border-border bg-black/25 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <span>Golpes do inimigo</span>
+              {enemyAttacksOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            </button>
+            {enemyAttacksOpen && (
+              <div className="mt-2 grid gap-1.5">
+                {activeBattle.enemyAttacks.map(attack => (
+                  <div key={attack.id} className="rounded border border-border bg-black/35 px-2 py-1.5 text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-foreground">{attack.name}</span>
+                      <span className="text-muted-foreground">Custo {attack.resourceCost}</span>
+                    </div>
+                    <p className="text-muted-foreground">{attack.description} Dano {attack.minDamage}-{attack.maxDamage}.</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Registro da luta</h3>
+              <span className={`text-xs font-bold ${battleAnimating ? 'text-secondary' : battleResultReady ? pendingBattleResult?.won ? 'text-primary' : 'text-destructive' : 'text-muted-foreground'}`}>
+                {battleAnimating ? 'Acontecendo...' : battleResultReady ? pendingBattleResult?.won ? 'Vitória' : 'Derrota' : 'Sua vez'}
+              </span>
+            </div>
+            <div className={`rounded border px-3 py-2 text-center ${currentEventTone}`}>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Evento atual</p>
+              <p className="mt-0.5 text-xl font-black leading-tight sm:text-2xl">{currentEventTitle}</p>
+              {currentRound && (
+                <p className="mt-1 text-xs text-foreground">{currentRound.text}</p>
+              )}
+            </div>
+            <div ref={battleLogRef} className="min-h-28 max-h-[22vh] space-y-1.5 overflow-auto pr-1">
+              {visibleRounds.map((round, index) => (
+                <div key={`${round.turn}-${round.actor}-${index}`} className={`rounded border px-2 py-1.5 text-xs animate-in fade-in slide-in-from-bottom-1 ${
+                  round.actor === 'player'
+                    ? 'border-primary/35 bg-primary/10'
+                    : round.actor === 'monster'
+                      ? 'border-destructive/30 bg-destructive/10'
+                      : 'border-border bg-black/35'
+                }`}>
+                  <p className={round.result === 'critical' ? 'text-primary font-semibold' : round.result === 'miss' ? 'text-muted-foreground italic' : 'text-foreground'}>{round.text}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Você {round.playerHp} vida · Inimigo {round.monsterHp} HP</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {!battleResultReady && (
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Ações</h3>
+                <p className="text-xs text-muted-foreground">{battleAnimating ? 'Aguarde...' : 'Escolha o movimento'}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => handleBattleAction('attack')} disabled={actionLocked} variant="outline" className="h-auto justify-start px-3 py-2 text-left">
+                  <span>
+                    <span className="block font-bold">Ataque básico</span>
+                    <span className="block text-[11px] font-normal text-muted-foreground">Sem custo · seguro</span>
+                  </span>
+                </Button>
+                <Button onClick={() => handleBattleAction('strong')} disabled={actionLocked || activeBattle.playerResource < activeBattle.classProfile.strongCost} variant="outline" className="h-auto justify-start px-3 py-2 text-left">
+                  <span>
+                    <span className="block font-bold">Golpe forte</span>
+                    <span className="block text-[11px] font-normal text-muted-foreground">Custa {activeBattle.classProfile.strongCost} {activeBattle.classProfile.resourceName}</span>
+                  </span>
+                </Button>
+                <Button onClick={() => handleBattleAction('special')} disabled={actionLocked || !canUseSpecial} className="h-auto justify-start px-3 py-2 text-left">
+                  <span>
+                    <span className="block font-bold">Especial</span>
+                    <span className="block text-[11px] font-normal opacity-80">Barra cheia + recurso</span>
+                  </span>
+                </Button>
+                {potionItems.length > 0 ? (
+                  <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => handleBattleAction('item', potionItems[0].itemId)} className="h-auto justify-start px-3 py-2 text-left">
+                    <span>
+                      <span className="block font-bold">Poção</span>
+                      <span className="block text-[11px] font-normal text-muted-foreground">{CONSUMABLE_ITEMS[potionItems[0].itemId].name} x{potionItems[0].quantity}</span>
+                    </span>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled className="h-auto justify-start px-3 py-2 text-left opacity-50">
+                    <span>
+                      <span className="block font-bold">Poção</span>
+                      <span className="block text-[11px] font-normal text-muted-foreground">Nenhuma</span>
+                    </span>
+                  </Button>
+                )}
+              </div>
+
+              {potionItems.length > 1 && (
+                <div className="grid grid-cols-2 gap-2">
+                  {potionItems.slice(1).map(item => (
+                    <Button key={item.itemId} size="sm" variant="outline" disabled={actionLocked} onClick={() => handleBattleAction('item', item.itemId)}>
+                      {CONSUMABLE_ITEMS[item.itemId].name} x{item.quantity}
+                    </Button>
+                  ))}
+                </div>
+              )}
+
+              <div className="rounded border border-border bg-black/25">
+                <button
+                  type="button"
+                  onClick={() => setAdvancedActionsOpen(open => !open)}
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                >
+                  <span>Golpes avançados</span>
+                  {advancedActionsOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                </button>
+                {advancedActionsOpen && (
+                  <div className="border-t border-border p-2 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2"
+                        disabled={techniquePage <= 0}
+                        onClick={() => setAdvancedActionPage(page => Math.max(0, page - 1))}
+                      >
+                        <ChevronLeft className="size-4" />
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">Página {techniquePage + 1}/{techniquePageCount}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2"
+                        disabled={techniquePage >= techniquePageCount - 1}
+                        onClick={() => setAdvancedActionPage(page => Math.min(techniquePageCount - 1, page + 1))}
+                      >
+                        <ChevronRight className="size-4" />
+                      </Button>
+                    </div>
+                    {visibleTechniques.map(technique => {
+                      const locked = character.level < technique.minLevel
+                      const lackingResource = activeBattle.playerResource < technique.resourceCost
+                      return (
+                        <Button
+                          key={technique.id}
+                          variant="outline"
+                          disabled={actionLocked || locked || lackingResource}
+                          onClick={() => handleBattleAction('technique', undefined, technique.id)}
+                          className={`h-auto w-full justify-start px-3 py-2 text-left ${locked ? 'opacity-60' : ''}`}
+                        >
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1 font-bold">
+                              {locked && <Lock className="size-3" />}
+                              {technique.name}
+                            </span>
+                            <span className="block text-[11px] font-normal text-muted-foreground">
+                              {locked ? `Libera no nível ${technique.minLevel}` : `${technique.resourceCost} ${activeBattle.classProfile.resourceName} · dano x${technique.damageMult.toFixed(1)}`}
+                            </span>
+                          </span>
+                        </Button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {!battleResultReady && (
+          <section className="dungeon-panel bg-card border border-border rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Carregar especial</h3>
+              <p className="text-[11px] text-muted-foreground">Pergunta gasta turno</p>
+            </div>
+            {!battleQuiz ? (
+              <div className="grid grid-cols-3 gap-2">
+                <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => handleDrawBattleQuiz('easy')}>Base</Button>
+                <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => handleDrawBattleQuiz('medium')}>Média</Button>
+                <Button size="sm" variant="outline" disabled={actionLocked} onClick={() => handleDrawBattleQuiz('hard')}>Difícil</Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-foreground">{battleQuiz.prompt}</p>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {battleQuiz.options.map((option, index) => (
+                    <Button key={option} variant="outline" disabled={actionLocked} className="w-full justify-start whitespace-normal text-left h-auto px-2 py-1.5 text-xs" onClick={() => handleAnswerBattleQuiz(index)}>
+                      {option}
+                    </Button>
+                  ))}
+                </div>
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setBattleQuiz(null)}>Trocar dificuldade</Button>
+              </div>
+            )}
+          </section>
+          )}
+
+          {battleResultReady && pendingBattleResult && (
+            <section className="dungeon-panel bg-card border border-border rounded-lg p-4 space-y-3">
+              <p className="font-semibold text-foreground">{pendingBattleResult.message}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {pendingBattleResult.goldGained > 0 && (
+                  <div className="rounded border border-primary/30 bg-primary/10 p-3 text-sm">
+                    <p className="font-semibold text-primary">Ouro para o Baú</p>
+                    <p className="text-xs text-muted-foreground">+R$ {pendingBattleResult.goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                  </div>
+                )}
+                {pendingBattleResult.itemGained && (
+                  <div className="rounded border border-primary/30 bg-primary/10 p-3 text-sm">
+                    <p className="font-semibold text-primary">Item encontrado</p>
+                    <p className="text-xs text-muted-foreground">{CONSUMABLE_ITEMS[pendingBattleResult.itemGained].name}</p>
+                  </div>
+                )}
+                <div className="rounded border border-border bg-black/35 p-3 text-sm">
+                  <p className="font-semibold text-foreground">XP da batalha</p>
+                  <p className="text-xs text-secondary">+{pendingBattleResult.xpGained} XP</p>
+                  <XPBreakdown lines={pendingBattleResult.xpBreakdown} />
+                </div>
+                {pendingBattleResult.damageTaken > 0 && (
+                  <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm">
+                    <p className="font-semibold text-destructive">Dano real sofrido</p>
+                    <p className="text-xs text-muted-foreground">-{pendingBattleResult.damageTaken} vida</p>
+                  </div>
+                )}
+              </div>
+              <Button className="w-full" onClick={() => {
+                setBattleScreenOpen(false)
+                setActiveBattle(null)
+                setPendingBattleResult(null)
+                if (pendingBattleResult.won) {
+                  setLootResult({
+                    kind: 'battle',
+                    title: 'Recompensa da batalha',
+                    message: pendingBattleResult.message,
+                    battle: pendingBattleResult,
+                  })
+                } else {
+                  onFlushPendingLevelUp()
+                }
+              }}>
+                Voltar para a ficha
+              </Button>
+            </section>
+          )}
+        </main>
+      </div>
+    )
   }
 
   const battleComplete = lastBattle ? visibleBattleRounds >= lastBattle.rounds.length : false
@@ -1663,11 +2163,11 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 <div>
                   <h3 className="font-semibold text-foreground text-sm uppercase tracking-wide">Arena da Masmorra</h3>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Até 3 batalhas por dia. Mantenha a vida alta fazendo seus registros em dia: perder uma luta tira vida real e pode derrubar o personagem se ele entrar fraco.
+                    Você tem até 5 cargas de batalha. Cada luta gasta 1 carga e a arena recupera 1 por hora. Perder uma luta tira vida real e pode derrubar o personagem se ele entrar fraco.
                   </p>
                 </div>
                 <span className="shrink-0 rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
-                  {battleCount}/3 hoje
+                  {battleCharges.current}/{battleCharges.max} cargas
                 </span>
               </div>
 
@@ -1686,16 +2186,23 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 </div>
               </div>
 
+              <div className="rounded border border-primary/25 bg-primary/10 p-3 text-xs text-muted-foreground">
+                {battleCharges.current >= battleCharges.max
+                  ? 'Energia da arena cheia.'
+                  : `Próxima carga em ${formatDuration(battleCharges.remainingMs)}.`}
+                <span className="ml-1">Batalhas feitas hoje: {battleCount}.</span>
+              </div>
+
               <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-xs text-muted-foreground">
                 Em derrota, você pode perder até <span className="font-bold text-destructive">{maxBattleLoss} de vida real</span>. Se sua vida atual não segurar isso, existe risco de queda.
               </div>
 
               <Button
                 onClick={handleBattle}
-                disabled={battleCount >= 3 || character.life <= 0}
+                disabled={battleCharges.current <= 0 || character.life <= 0 || Boolean(activeBattle)}
                 className="w-full py-3 disabled:opacity-40"
               >
-                {battleCount >= 3 ? 'Limite diário atingido' : character.life <= 0 ? 'Sem vida para lutar' : 'Iniciar Batalha'}
+                {battleCharges.current <= 0 ? 'Aguardando recarga' : character.life <= 0 ? 'Sem vida para lutar' : 'Iniciar Batalha'}
               </Button>
             </section>
 
