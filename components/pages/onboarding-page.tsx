@@ -10,6 +10,7 @@ import {
   createCharacter,
   type Character,
 } from '@/lib/types'
+import { dateToISO } from '@/lib/date'
 
 interface OnboardingPageProps {
   onCharacterCreated: (character: Character) => void
@@ -24,8 +25,8 @@ export default function OnboardingPage({ onCharacterCreated, userName }: Onboard
     charClass: '' as CharacterClass | '',
     category: '' as Category | '',
     maxTreasure: '',
-    cycleStart: new Date().toISOString().split('T')[0],
-    cycleEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    cycleStart: dateToISO(),
+    cycleEnd: dateToISO(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
     journeyMarker: '',
   })
 
@@ -63,7 +64,7 @@ export default function OnboardingPage({ onCharacterCreated, userName }: Onboard
 
   const classDef = CLASSES.find(c => c.id === form.charClass)
   const cycledays = form.cycleStart && form.cycleEnd && form.cycleEnd > form.cycleStart
-    ? Math.round((new Date(form.cycleEnd).getTime() - new Date(form.cycleStart).getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.round((new Date(form.cycleEnd).getTime() - new Date(form.cycleStart).getTime()) / (1000 * 60 * 60 * 24)) + 1
     : 0
 
   return (

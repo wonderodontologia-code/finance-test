@@ -9,7 +9,8 @@ import {
   calcDaysInCycle,
   calcEffectiveAttributes,
 } from '@/lib/types'
-import { calcBossResult, startNewCycle } from '@/lib/game-engine'
+import { calcBossResult, calcBossRisk, startNewCycle } from '@/lib/game-engine'
+import { dateToISO } from '@/lib/date'
 
 interface BossFinalPageProps {
   character: Character
@@ -27,15 +28,16 @@ const RESULT_LABELS: Record<string, { title: string; subtitle: string; color: st
 export default function BossFinalPage({ character, onComplete }: BossFinalPageProps) {
   const [phase, setPhase] = useState<'summary' | 'new-cycle'>('summary')
   const [form, setForm] = useState({
-    maxTreasure: String(character.maxTreasure),
-    cycleStart: new Date().toISOString().split('T')[0],
-    cycleEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maxTreasure: String(character.nextCycleMaxTreasure ?? character.maxTreasure),
+    cycleStart: dateToISO(),
+    cycleEnd: dateToISO(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
     journeyMarker: '0',
   })
 
   const classDef = CLASSES.find(c => c.id === character.class)!
   const ouroConsumido = calcOuroConsumido(character)
   const { result, goldPreserved, xpBonus, victoryTitle } = calcBossResult(character)
+  const bossRisk = calcBossRisk(character)
   const resultInfo = RESULT_LABELS[result]
   const daysTotal = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysRegistered = character.dailyRecords.filter(r => r.registered).length
@@ -171,6 +173,27 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
             </div>
           )}
 
+          <section className={`dungeon-panel bg-card border rounded-lg p-4 space-y-3 text-sm ${bossRisk.survives ? 'border-primary/30' : 'border-destructive/40'}`}>
+            <h3 className="font-semibold text-foreground uppercase tracking-wide text-xs">Risco do Boss</h3>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground">Dano estimado</span>
+              <span className={`font-bold ${bossRisk.survives ? 'text-primary' : 'text-destructive'}`}>-{bossRisk.damageTaken} vida</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground">Sobrevive?</span>
+              <span className={`font-bold ${bossRisk.survives ? 'text-primary' : 'text-destructive'}`}>
+                {bossRisk.survives ? 'Sim' : 'Não'}
+              </span>
+            </div>
+            {bossRisk.overLimit > 0 && (
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">Acima do limite</span>
+                <span className="font-bold text-secondary">R$ {bossRisk.overLimit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">{bossRisk.advice}</p>
+          </section>
+
           <Button
             onClick={() => setPhase('new-cycle')}
             className="w-full bg-primary text-primary-foreground hover:bg-primary/90 py-3"
@@ -183,7 +206,7 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
   }
 
   const cycleDays = form.cycleStart && form.cycleEnd && form.cycleEnd > form.cycleStart
-    ? Math.round((new Date(form.cycleEnd).getTime() - new Date(form.cycleStart).getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.round((new Date(form.cycleEnd).getTime() - new Date(form.cycleStart).getTime()) / (1000 * 60 * 60 * 24)) + 1
     : 0
 
   return (
@@ -197,10 +220,11 @@ export default function BossFinalPage({ character, onComplete }: BossFinalPagePr
 
       <main className="max-w-xl mx-auto px-4 py-6 space-y-4">
         <div>
-          <label className="text-sm text-muted-foreground block mb-1">Tesouro Máximo (R$)</label>
+          <label className="text-sm text-muted-foreground block mb-1">Alvo do próximo ciclo (R$)</label>
           <input type="number" value={form.maxTreasure}
             onChange={e => setForm({ ...form, maxTreasure: e.target.value })}
             className="w-full px-4 py-3 rounded-lg border border-border bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+          <p className="text-xs text-muted-foreground mt-1">O ciclo atual já foi fechado. Este valor vale só para a próxima campanha.</p>
         </div>
         <div>
           <label className="text-sm text-muted-foreground block mb-1">Início do ciclo</label>

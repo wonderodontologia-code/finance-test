@@ -9,10 +9,10 @@ import {
   classImageForLevel,
   calcOuroConsumido,
   calcJourneyQuota,
-  calcDaysInCycle,
   calcDaysLeft,
   levelTitle,
 } from '@/lib/types'
+import { dateToISO } from '@/lib/date'
 
 interface GuildPageProps {
   characters: Character[]
@@ -52,13 +52,12 @@ function CharacterCard({
   const classDef = CLASSES.find(c => c.id === character.class)!
   const classImage = classImageForLevel(classDef, character.level)
   const ouroConsumido = calcOuroConsumido(character)
-  const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysLeft = calcDaysLeft(character.cycleEnd)
-  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, daysInCycle)
+  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, ouroConsumido, Math.max(1, daysLeft))
   const spentPct = character.maxTreasure > 0 ? Math.min(100, Math.round((ouroConsumido / character.maxTreasure) * 100)) : 0
   const lifePct = character.maxLife > 0 ? Math.min(100, Math.round((character.life / character.maxLife) * 100)) : 0
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = dateToISO()
   const registeredToday = character.dailyRecords.some(r => r.date === today)
 
   const isAtRisk = spentPct >= 80
@@ -134,12 +133,12 @@ function CharacterCard({
         {/* Info row */}
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
-            Cota: <span className="font-semibold text-secondary">R$ {quota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/dia</span>
+            Cota de hoje: <span className="font-semibold text-secondary">R$ {quota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
           </span>
           <span>
             {daysLeft > 0 ? (
               <span className={daysLeft <= 5 ? 'text-destructive font-semibold' : ''}>
-                {daysLeft} dias restantes
+                {daysLeft} dias restantes para redistribuir
               </span>
             ) : (
               <span className="text-accent font-semibold">Boss Final!</span>

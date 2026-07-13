@@ -31,6 +31,7 @@ import {
   weaponNameForClass,
   xpForLevel,
 } from './types'
+import { addDaysISO, dateToISO, startOfWeekISO as startOfWeekISODate } from './date'
 
 export interface GameEvent {
   type: 'missed_day' | 'death' | 'last_breath' | 'boss_ready' | 'regen' | 'system'
@@ -108,21 +109,15 @@ export interface FinancialEventView {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().split('T')[0]
+  return dateToISO()
 }
 
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T12:00:00')
-  d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
+  return addDaysISO(dateStr, days)
 }
 
 function startOfWeekISO(date = new Date()): string {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  d.setDate(d.getDate() + diff)
-  return d.toISOString().split('T')[0]
+  return startOfWeekISODate(date)
 }
 
 function maxISODate(a: string, b: string): string {
@@ -132,7 +127,7 @@ function maxISODate(a: string, b: string): string {
 function createdDate(char: Character): string {
   const created = char.createdAt ? new Date(char.createdAt) : new Date()
   if (Number.isNaN(created.getTime())) return todayISO()
-  return created.toISOString().split('T')[0]
+  return dateToISO(created)
 }
 
 function appendEventLog(
@@ -663,12 +658,45 @@ export function getFinancialEvents(char: Character): FinancialEventView[] {
         id: 'next-checkin',
         title: 'Próxima Ronda do Tesouro',
         description: 'Volte para uma recompensa rápida e manutenção do hábito.',
-        date: next.toISOString().split('T')[0],
+        date: dateToISO(next),
         severity: canCheckin(current) ? 'good' : 'neutral',
       })
     }
   }
   return events
+}
+
+export function calcBossRisk(char: Character): {
+  overLimit: number
+  damageTaken: number
+  survives: boolean
+  advice: string
+} {
+  const current = normalizeCharacter(char)
+  const totalSpent = calcOuroConsumido(current)
+  const overLimit = Math.max(0, totalSpent - current.maxTreasure)
+  if (overLimit <= 0) {
+    return {
+      overLimit: 0,
+      damageTaken: 0,
+      survives: true,
+      advice: 'Você ainda está dentro do limite. Seguir abaixo do alvo hoje ajuda a ampliar a folga até o Boss Final.',
+    }
+  }
+
+  const lifePressure = current.maxTreasure > 0 ? overLimit / current.maxTreasure : 1
+  const baseDamage = Math.max(1, Math.round(current.maxLife * (0.25 + lifePressure * 1.35)))
+  const damageTaken = Math.min(current.maxLife, baseDamage)
+  const survives = current.life > damageTaken
+
+  let advice = 'Se quiser sobreviver, reduza gastos agora, prefira o próximo registro abaixo da cota e considere usar poção antes do fechamento.'
+  if (!survives) {
+    advice = 'Do jeito que está, o Boss Final derruba o personagem. A saída mais segura é cortar gastos imediatos, registrar abaixo da cota hoje e recuperar vida antes do fechamento.'
+  } else if (damageTaken > current.life * 0.6) {
+    advice = 'Você ainda sobrevive, mas por pouco. Vale segurar gastos hoje e entrar no Boss Final com mais vida ou com poção pronta.'
+  }
+
+  return { overLimit, damageTaken, survives, advice }
 }
 
 function handleDeath(char: Character): Character {
@@ -892,12 +920,14 @@ export function startNewCycle(
 ): Character {
   const history = buildCycleHistory(char)
   let updated = applyLevelUp(char, calcBossResult(char).xpBonus)
+  const nextMaxTreasure = char.nextCycleMaxTreasure ?? params.maxTreasure
 
   return applyLevelUp({
     ...updated,
     cycleStart: params.cycleStart,
     cycleEnd: params.cycleEnd,
-    maxTreasure: params.maxTreasure,
+    maxTreasure: nextMaxTreasure,
+    nextCycleMaxTreasure: undefined,
     journeyMarker: params.journeyMarker,
     journeyMarkerXpGranted: true,
     dailyRecords: [],
@@ -944,6 +974,76 @@ export interface BattleRound {
   text: string
 }
 
+interface BattleMonsterDefinition {
+  id: string
+  name: string
+  minLevel: number
+  weight: number
+  hpMult: number
+  powerMult: number
+  xpBonus: number
+  goldBonus: number
+  missMod: number
+  critMod: number
+}
+
+const BATTLE_MONSTERS: BattleMonsterDefinition[] = [
+  {
+    id: 'cobrador',
+    name: 'Cobrador da Masmorra',
+    minLevel: 1,
+    weight: 5,
+    hpMult: 1,
+    powerMult: 1,
+    xpBonus: 0,
+    goldBonus: 0,
+    missMod: 0,
+    critMod: 0,
+  },
+  {
+    id: 'fatura_viva',
+    name: 'Fatura Viva',
+    minLevel: 2,
+    weight: 4,
+    hpMult: 1.12,
+    powerMult: 1.08,
+    xpBonus: 4,
+    goldBonus: 4,
+    missMod: -0.02,
+    critMod: 0.01,
+  },
+  {
+    id: 'agente_dos_juros',
+    name: 'Agente dos Juros',
+    minLevel: 4,
+    weight: 3,
+    hpMult: 1.28,
+    powerMult: 1.22,
+    xpBonus: 8,
+    goldBonus: 8,
+    missMod: -0.04,
+    critMod: 0.025,
+  },
+  {
+    id: 'devorador_de_limite',
+    name: 'Devorador de Limite',
+    minLevel: 6,
+    weight: 2,
+    hpMult: 1.45,
+    powerMult: 1.36,
+    xpBonus: 14,
+    goldBonus: 14,
+    missMod: -0.06,
+    critMod: 0.04,
+  },
+]
+
+function chooseBattleMonster(char: Character, battleNumber: number): BattleMonsterDefinition {
+  const available = BATTLE_MONSTERS.filter(monster => char.level >= monster.minLevel)
+  const weighted = available.flatMap(monster => Array.from({ length: monster.weight + battleNumber }, () => monster))
+  return weighted[Math.floor(Math.random() * weighted.length)] ?? BATTLE_MONSTERS[0]
+}
+
 export function battlesToday(char: Character): number {
   const today = todayISO()
   return (char.battleLog ?? []).find(log => log.date === today)?.count ?? 0
@@ -974,9 +1074,9 @@ export function maxBattleDamageOnDefeat(char: Character): number {
   const current = normalizeCharacter(char)
   const classDef = CLASSES.find(c => c.id === current.class)!
   const attrs = calcEffectiveAttributes(current)
-  const raw = 3 + Math.ceil(current.level * 0.55) + battlesToday(current)
+  const raw = 4 + Math.ceil(current.level * 0.8) + battlesToday(current) * 2
   const reduced = Math.round(raw * (1 - Math.min(0.35, attrs.resiliencia * 0.025)) * classDef.damageMod)
-  return Math.max(0, Math.min(Math.max(0, Math.floor(current.life / 2)), Math.max(1, reduced)))
+  return Math.max(1, reduced)
 }
 
 function incrementBattleCount(char: Character): Character {
@@ -1003,7 +1103,7 @@ function addInventoryItem(char: Character, itemId: ConsumableItemId, quantity = 
 }
 
 function dateOnly(date: Date): string {
-  return date.toISOString().split('T')[0]
+  return dateToISO(date)
 }
 
 function daysSince(startedAt: string, now = new Date()): number {
@@ -1354,7 +1454,9 @@ export function performCheckin(char: Character): CheckinResult {
 
 export function performBattle(char: Character): BattleResult {
   let current = normalizeCharacter(char)
-  const monsterName = 'Cobrador da Masmorra'
+  const battleNumber = battlesToday(current)
+  const monster = chooseBattleMonster(current, battleNumber)
+  const monsterName = monster.name
   if (battlesToday(current) >= 3) {
     return {
       character: current,
@@ -1375,24 +1477,23 @@ export function performBattle(char: Character): BattleResult {
   const classDef = CLASSES.find(c => c.id === current.class)!
   const attrs = calcEffectiveAttributes(current)
   const attack =
-    current.level * 5 +
-    attrs.vigor * 1.2 +
-    attrs.sabedoria * 1.3 +
-    attrs.disciplina * 1.4 +
-    attrs.prosperidade * 1.1 +
-    attrs.resiliencia * 0.8
-  const battleNumber = battlesToday(current)
-  const enemyPower = 9 + current.level * 3.5 + battleNumber * 3
-  const playerBattleHpStart = Math.max(12, current.life + current.level * 3 + attrs.vigor * 2)
-  const monsterHpStart = Math.round(16 + current.level * 5 + battleNumber * 5)
+    current.level * 4.2 +
+    attrs.vigor * 1.05 +
+    attrs.sabedoria * 1.05 +
+    attrs.disciplina * 1.2 +
+    attrs.prosperidade * 0.9 +
+    attrs.resiliencia * 0.65
+  const enemyPower = (12 + current.level * 4.4 + battleNumber * 4.5) * monster.powerMult
+  const playerBattleHpStart = Math.max(12, current.life + current.level * 2 + attrs.vigor * 1.5)
+  const monsterHpStart = Math.round((20 + current.level * 7 + battleNumber * 7) * monster.hpMult)
   const defeatDamage = maxBattleDamageOnDefeat(current)
   let playerHp = playerBattleHpStart
   let monsterHp = monsterHpStart
   const rounds: BattleRound[] = []
 
   for (let turn = 1; turn <= 16 && playerHp > 0 && monsterHp > 0; turn += 1) {
-    const playerMissChance = Math.max(0.06, 0.18 - attrs.disciplina * 0.012)
-    const playerCritChance = Math.min(0.34, 0.1 + attrs.sabedoria * 0.014 + attrs.prosperidade * 0.008)
+    const playerMissChance = Math.max(0.08, 0.2 - attrs.disciplina * 0.01)
+    const playerCritChance = Math.min(0.28, 0.08 + attrs.sabedoria * 0.012 + attrs.prosperidade * 0.006)
     const playerRoll = Math.random()
 
     if (playerRoll < playerMissChance) {
@@ -1407,7 +1508,7 @@ export function performBattle(char: Character): BattleResult {
       })
     } else {
       const critical = playerRoll > 1 - playerCritChance
-      const baseDamage = Math.max(3, Math.round(attack / 4.2 + Math.random() * (5 + current.level)))
+      const baseDamage = Math.max(3, Math.round(attack / 5.2 + Math.random() * (4 + current.level * 0.8)))
       const damage = critical ? Math.round(baseDamage * 1.8) : baseDamage
       monsterHp = Math.max(0, monsterHp - damage)
       rounds.push({
@@ -1425,8 +1526,8 @@ export function performBattle(char: Character): BattleResult {
 
     if (monsterHp <= 0) break
 
-    const monsterMissChance = Math.min(0.38, 0.16 + attrs.resiliencia * 0.014)
-    const monsterCritChance = Math.max(0.03, 0.1 - attrs.resiliencia * 0.007)
+    const monsterMissChance = Math.max(0.04, Math.min(0.3, 0.13 + attrs.resiliencia * 0.01 + monster.missMod))
+    const monsterCritChance = Math.max(0.04, 0.12 - attrs.resiliencia * 0.005 + monster.critMod)
     const monsterRoll = Math.random()
 
     if (monsterRoll < monsterMissChance) {
@@ -1441,8 +1542,8 @@ export function performBattle(char: Character): BattleResult {
       })
     } else {
       const critical = monsterRoll > 1 - monsterCritChance
-      const baseDamage = Math.max(1, Math.round(enemyPower / 11 + Math.random() * (2 + battleNumber)))
-      const damage = critical ? Math.round(baseDamage * 1.5) : baseDamage
+      const baseDamage = Math.max(2, Math.round(enemyPower / 8.5 + Math.random() * (3 + battleNumber)))
+      const damage = critical ? Math.round(baseDamage * 1.6) : baseDamage
       playerHp = Math.max(0, playerHp - damage)
       rounds.push({
         turn,
@@ -1458,12 +1559,12 @@ export function performBattle(char: Character): BattleResult {
     }
   }
 
-  const won = monsterHp <= 0 || (playerHp > 0 && monsterHp <= monsterHpStart * 0.35)
+  const won = monsterHp <= 0
 
   current = incrementBattleCount(current)
 
   if (won) {
-    const baseXP = 18
+    const baseXP = 18 + monster.xpBonus
     const levelXP = current.level * 4
     const sabedoriaXP = Math.round(attrs.sabedoria * 1.5)
     const xpGained = Math.round(baseXP + levelXP + sabedoriaXP)
@@ -1479,7 +1580,7 @@ export function performBattle(char: Character): BattleResult {
     const lootRoll = Math.random()
 
     if (lootRoll > 0.72) {
-      goldGained = Math.round(12 + current.level * 4 + attrs.prosperidade * 3)
+      goldGained = Math.round(12 + current.level * 4 + attrs.prosperidade * 3 + monster.goldBonus)
     } else if (lootRoll > 0.52) {
       itemGained = Math.random() > 0.78 ? 'pocao_grande' : 'pocao_pequena'
       current = addInventoryItem(current, itemGained, 1)
@@ -1513,11 +1614,20 @@ export function performBattle(char: Character): BattleResult {
   const lossXpBreakdown: XPBreakdownLine[] = [
     { label: 'XP de sobrevivência', value: lossXp, detail: `Baseado no nível ${current.level}`, kind: 'level' },
   ]
+  const lifeAfterDamage = current.life - reduced
   current = applyLevelUp({
     ...current,
-    life: Math.max(0, current.life - reduced),
+    life: Math.max(0, lifeAfterDamage),
   }, lossXp)
-  if (reduced > 0) {
+  if (lifeAfterDamage <= 0) {
+    current = appendEventLog(handleDeath(current), {
+      type: 'death',
+      date: new Date().toISOString(),
+      message: `${char.name} caiu em batalha contra ${monsterName}. Voltou ao nível 1; itens e equipamentos foram perdidos, mas o Baú foi preservado.`,
+      damage: reduced,
+      lifeAfter: 0,
+    })
+  } else if (reduced > 0) {
     current = appendEventLog(current, {
       type: 'damage',
       date: new Date().toISOString(),
@@ -1530,7 +1640,9 @@ export function performBattle(char: Character): BattleResult {
   return {
     character: current,
     won,
-    message: `${current.name} perdeu a batalha e recuou antes de cair.`,
+    message: lifeAfterDamage <= 0
+      ? `${char.name} caiu em batalha contra ${monsterName}.`
+      : `${current.name} perdeu a batalha e recuou antes de cair.`,
     xpGained: lossXp,
     damageTaken: reduced,
     goldGained: 0,
@@ -1541,7 +1653,7 @@ export function performBattle(char: Character): BattleResult {
     monsterHpEnd: monsterHp,
     rounds,
     xpBreakdown: lossXpBreakdown,
-    died: false,
+    died: lifeAfterDamage <= 0,
   }
 }
 

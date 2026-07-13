@@ -6,12 +6,12 @@ import {
   type Character,
   CLASSES,
   calcJourneyQuota,
-  calcDaysInCycle,
   calcRegistrationXP,
   calcEffectiveAttributes,
   xpForLevel,
 } from '@/lib/types'
 import { DAILY_MISSION_XP, completeDailyMission } from '@/lib/game-engine'
+import { dateToISO } from '@/lib/date'
 
 interface RitualRegisterModalProps {
   character: Character
@@ -20,7 +20,7 @@ interface RitualRegisterModalProps {
 }
 
 export default function RitualRegisterModal({ character, onClose, onConfirm }: RitualRegisterModalProps) {
-  const today = new Date().toISOString().split('T')[0]
+  const today = dateToISO()
   const existingRecord = character.dailyRecords.find(r => r.date === today) ?? null
   const isEditing = existingRecord !== null
 
@@ -31,8 +31,9 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
 
   const classDef = CLASSES.find(c => c.id === character.class)!
   const effectiveAttributes = calcEffectiveAttributes(character)
-  const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
-  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, daysInCycle)
+  const totalSpent = character.journeyMarker + character.dailyRecords.reduce((sum, record) => record.date === today ? sum : sum + record.amount, 0)
+  const daysLeft = Math.max(1, Math.ceil((new Date(character.cycleEnd + 'T23:59:59').getTime() - new Date(today + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24)))
+  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, totalSpent, daysLeft)
 
   const previousTotal = character.journeyMarker + character.dailyRecords.reduce(
     (sum, record) => record.date === today ? sum : sum + record.amount,
@@ -102,6 +103,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
       let newXP = character.xp + xpDelta
       let newLevel = character.level
       let newXPToNext = character.xpToNextLevel
+      const oldLevel = character.level
       let newAttrPoints = character.attributePoints
 
       // Handle gaining levels
@@ -118,6 +120,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
         newXP += newXPToNext
       }
       if (newXP < 0) newXP = 0
+      newAttrPoints = Math.max(0, character.attributePoints + (newLevel - oldLevel))
 
       // Replace the record in the array — no combo/life changes
       const updated: Character = {
@@ -183,8 +186,8 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
       : `Boa! Hoje tu manteve o controle da jornada.`
 
     return (
-      <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm">
-        <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg w-full max-w-md p-6 space-y-4 text-center">
+    <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm">
+      <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto p-6 space-y-4 text-center">
           <div className="w-12 h-12 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center mx-auto">
             <span className="text-primary font-bold text-xl">!</span>
           </div>
@@ -248,7 +251,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm">
-      <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg w-full max-w-md space-y-0 overflow-hidden">
+      <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 border-b border-border">
           <div className="flex items-start justify-between">
@@ -271,13 +274,16 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
           </div>
         </div>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4 overscroll-contain">
           {/* Cota info */}
           <div className="bg-black/35 border border-border rounded-lg p-3 text-sm flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Cota de Jornada de hoje</p>
               <p className="font-bold text-foreground text-lg">
                 R$ {quota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Redistribui o que ainda falta gastar pelos dias restantes.
               </p>
             </div>
             <div className="text-right">
@@ -401,7 +407,7 @@ export default function RitualRegisterModal({ character, onClose, onConfirm }: R
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3">
+        <div className="shrink-0 px-6 pb-6 pt-4 flex gap-3 border-t border-border bg-card">
           <Button variant="outline" onClick={onClose} className="flex-1">
             Cancelar
           </Button>

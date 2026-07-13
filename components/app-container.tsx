@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { type Character, CLASSES, classImageForLevel, levelTitle } from '@/lib/types'
 import { createBackup, loadState, parseBackup, saveState, clearState } from '@/lib/storage'
 import { processDailyChecks, getCharactersNeedingBoss } from '@/lib/game-engine'
+import { dateToISO } from '@/lib/date'
 
 type PageType = 'landing' | 'login' | 'onboarding' | 'guild' | 'character-detail' | 'boss-final'
 
@@ -23,6 +24,10 @@ interface LevelUpState {
   toLevel: number
   newTitle: string
   pointsGained: number
+}
+
+interface UpdateCharacterOptions {
+  deferLevelUp?: boolean
 }
 
 function LevelUpModal({ levelUp, onClose }: { levelUp: LevelUpState; onClose: () => void }) {
@@ -96,6 +101,7 @@ export default function AppContainer() {
   const [bossCharacterId, setBossCharacterId] = useState<string | null>(null)
   const [gameEvents, setGameEvents] = useState<string[]>([])
   const [levelUp, setLevelUp] = useState<LevelUpState | null>(null)
+  const [pendingLevelUp, setPendingLevelUp] = useState<LevelUpState | null>(null)
 
   // Hydrate from localStorage
   useEffect(() => {
@@ -126,12 +132,12 @@ export default function AppContainer() {
     }
   }, [hydrated, userName, characters, currentPage])
 
-  const updateCharacter = useCallback((updated: Character) => {
+  const updateCharacter = useCallback((updated: Character, options?: UpdateCharacterOptions) => {
     const previous = characters.find(c => c.id === updated.id)
     if (previous && updated.level > previous.level) {
       const classDef = CLASSES.find(cls => cls.id === updated.class)!
       const classImage = classImageForLevel(classDef, updated.level)
-      setLevelUp({
+      const nextLevelUp = {
         characterName: updated.name,
         className: classDef.name,
         classImageSrc: classImage.src,
@@ -139,10 +145,18 @@ export default function AppContainer() {
         toLevel: updated.level,
         newTitle: levelTitle(updated.level),
         pointsGained: Math.max(0, updated.level - previous.level),
-      })
+      }
+      if (options?.deferLevelUp) setPendingLevelUp(nextLevelUp)
+      else setLevelUp(nextLevelUp)
     }
     setCharacters(prev => prev.map(c => c.id === updated.id ? updated : c))
   }, [characters])
+
+  const flushPendingLevelUp = useCallback(() => {
+    if (!pendingLevelUp) return
+    setLevelUp(pendingLevelUp)
+    setPendingLevelUp(null)
+  }, [pendingLevelUp])
 
   const handleRenameCharacter = useCallback((id: string) => {
     const character = characters.find(c => c.id === id)
@@ -203,7 +217,7 @@ export default function AppContainer() {
     })
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const date = new Date().toISOString().split('T')[0]
+    const date = dateToISO()
     const link = document.createElement('a')
     link.href = url
     link.download = `reino-dos-gastos-backup-${date}.json`
@@ -318,6 +332,7 @@ export default function AppContainer() {
           character={selectedCharacter}
           onBack={() => setCurrentPage('guild')}
           onUpdateCharacter={updateCharacter}
+          onFlushPendingLevelUp={flushPendingLevelUp}
           onRenameCharacter={() => handleRenameCharacter(selectedCharacter.id)}
           onDeleteCharacter={() => handleDeleteCharacter(selectedCharacter.id)}
           onOpenRitual={() => setRitualCharacterId(selectedCharacter.id)}

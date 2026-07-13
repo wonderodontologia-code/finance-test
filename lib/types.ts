@@ -1,5 +1,7 @@
 // ─── Core types for Reino dos Gastos ────────────────────────────────────────
 
+import { dateToISO } from './date'
+
 export type CharacterClass = 'guerreiro' | 'mago' | 'ladino'
 
 export type Category =
@@ -184,6 +186,7 @@ export interface Character {
   cycleStart: string
   cycleEnd: string
   maxTreasure: number
+  nextCycleMaxTreasure?: number
   journeyMarker: number       // Marco Inicial da Jornada
   journeyMarkerXpGranted: boolean
   // Vida
@@ -752,6 +755,7 @@ export function normalizeCharacter(character: Character): Character {
     deathCount: character.deathCount ?? 0,
     eventLog: character.eventLog ?? [],
     goldChest: character.goldChest ?? 0,
+    nextCycleMaxTreasure: character.nextCycleMaxTreasure,
   }
 }
 
@@ -763,24 +767,24 @@ export function calcMaxLife(level: number, attributes: Attributes, classDef: Cla
   return Math.round((base + vigorBonus) * classDef.lifeBonus)
 }
 
-export function calcJourneyQuota(maxTreasure: number, journeyMarker: number, daysInCycle: number): number {
-  const available = maxTreasure - journeyMarker
-  if (available <= 0 || daysInCycle <= 0) return 0
-  return available / daysInCycle
+export function calcJourneyQuota(maxTreasure: number, journeyMarker: number, totalSpent: number, daysLeft: number): number {
+  const remainingBudget = maxTreasure - journeyMarker - totalSpent
+  if (remainingBudget <= 0 || daysLeft <= 0) return 0
+  return remainingBudget / daysLeft
 }
 
 export function calcDaysInCycle(start: string, end: string): number {
   const s = new Date(start)
   const e = new Date(end)
   const diff = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
-  return Math.max(1, diff)
+  return Math.max(1, diff + 1)
 }
 
 export function calcDaysLeft(end: string): number {
-  const today = new Date()
+  const today = new Date(`${dateToISO()}T12:00:00.000Z`)
   const e = new Date(end)
   const diff = Math.round((e.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-  return Math.max(0, diff)
+  return Math.max(0, diff + 1)
 }
 
 export function calcOuroConsumido(character: Character): number {
@@ -880,6 +884,7 @@ export function createCharacter(params: {
     cycleStart: params.cycleStart,
     cycleEnd: params.cycleEnd,
     maxTreasure: params.maxTreasure,
+    nextCycleMaxTreasure: undefined,
     journeyMarker: params.journeyMarker,
     journeyMarkerXpGranted: true,
     life: maxLife,

@@ -41,6 +41,7 @@ import {
   classImageForLevel,
   nextClassImageStage,
 } from '@/lib/types'
+import { dateToISO } from '@/lib/date'
 import {
   type BattleResult,
   type CheckinResult,
@@ -59,6 +60,7 @@ import {
   getCodexEntries,
   getConsistencyCalendar,
   getCycleGoals,
+  calcBossRisk,
   getDailyMissions,
   getFinancialEvents,
   getNextActions,
@@ -77,7 +79,8 @@ import {
 interface CharacterDetailPageProps {
   character: Character
   onBack: () => void
-  onUpdateCharacter: (updated: Character) => void
+  onUpdateCharacter: (updated: Character, options?: { deferLevelUp?: boolean }) => void
+  onFlushPendingLevelUp: () => void
   onRenameCharacter: () => void
   onDeleteCharacter: () => void
   onOpenRitual: () => void
@@ -182,6 +185,72 @@ function XPBreakdown({ lines }: { lines?: XPBreakdownLine[] }) {
   )
 }
 
+type LootResult =
+  | { kind: 'checkin'; title: string; message: string; reward: CheckinReward; missionMessage?: string }
+  | { kind: 'exploration'; title: string; message: string; reward: ExplorationReward }
+
+function LootResultModal({ result, onClose }: { result: LootResult; onClose: () => void }) {
+  const isCheckin = result.kind === 'checkin'
+  const rewardLabel = isCheckin ? rewardTitle(result.reward) : explorationRewardTitle(result.reward)
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-4 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true">
+      <div className="dungeon-panel gold-frame max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-primary/45 bg-card p-5 shadow-2xl">
+        <div className="flex items-center gap-4">
+          <img
+            src={result.reward.imageSrc}
+            alt=""
+            className="size-20 rounded border border-primary/35 object-cover"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary">{result.title}</p>
+            <h3 className="font-bold text-foreground">{rewardLabel}</h3>
+            <p className="text-sm font-semibold text-secondary">{result.reward.label}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 text-sm">
+          {'xpGained' in result.reward && result.reward.xpGained ? (
+            <div className="rounded border border-border bg-black/35 p-3">
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">XP recebido</span>
+                <span className="font-bold text-secondary">+{result.reward.xpGained}</span>
+              </div>
+              <XPBreakdown lines={result.reward.xpBreakdown} />
+            </div>
+          ) : null}
+          {'goldGained' in result.reward && result.reward.goldGained ? (
+            <div className="rounded border border-primary/30 bg-primary/10 p-3">
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">Ouro no Baú</span>
+                <span className="font-bold text-primary">+R$ {result.reward.goldGained.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          ) : null}
+          {'itemGained' in result.reward && result.reward.itemGained ? (
+            <div className="rounded border border-primary/30 bg-primary/10 p-3 text-primary font-semibold">
+              Item guardado na mochila.
+            </div>
+          ) : null}
+          {'equipmentSlotGained' in result.reward && result.reward.equipmentSlotGained ? (
+            <div className="rounded border border-primary/30 bg-primary/10 p-3 text-primary font-semibold">
+              Equipamento adicionado ao inventário.
+            </div>
+          ) : null}
+        </div>
+
+        <p className="mt-4 text-sm text-muted-foreground">{result.message}</p>
+        {isCheckin && result.missionMessage && (
+          <p className="mt-2 rounded border border-secondary/30 bg-secondary/10 p-3 text-xs text-muted-foreground">{result.missionMessage}</p>
+        )}
+        <Button onClick={onClose} className="mt-5 w-full py-3 text-base font-semibold">
+          Continuar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function locationById(locationId: ExplorationLocationId) {
   return EXPLORATION_LOCATIONS.find(location => location.id === locationId) ?? EXPLORATION_LOCATIONS[0]
 }
@@ -199,7 +268,7 @@ function routePoint(fromId: ExplorationLocationId, toId: ExplorationLocationId, 
 type DetailTab = 'stats' | 'checkin' | 'explore' | 'battle' | 'inventory' | 'shop' | 'attributes' | 'realm' | 'history'
 type HistoryFilter = 'all' | CharacterEventLogType
 
-export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onRenameCharacter, onDeleteCharacter, onOpenRitual }: CharacterDetailPageProps) {
+export default function CharacterDetailPage({ character, onBack, onUpdateCharacter, onFlushPendingLevelUp, onRenameCharacter, onDeleteCharacter, onOpenRitual }: CharacterDetailPageProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('stats')
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all')
   const [tooltipAttr, setTooltipAttr] = useState<string | null>(null)
@@ -209,11 +278,14 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [lastBattle, setLastBattle] = useState<BattleResult | null>(null)
   const [lastCheckin, setLastCheckin] = useState<CheckinResult | null>(null)
+  const [lootResult, setLootResult] = useState<LootResult | null>(null)
   const [selectedLocationId, setSelectedLocationId] = useState<ExplorationLocationId | null>(null)
   const [showPositionDetails, setShowPositionDetails] = useState(false)
   const [battleScreenOpen, setBattleScreenOpen] = useState(false)
   const [visibleBattleRounds, setVisibleBattleRounds] = useState(0)
   const [nowTick, setNowTick] = useState(() => Date.now())
+  const [editingNextCycleTarget, setEditingNextCycleTarget] = useState(false)
+  const [nextCycleTargetValue, setNextCycleTargetValue] = useState(String(character.nextCycleMaxTreasure ?? character.maxTreasure))
 
   const classDef = CLASSES.find(c => c.id === character.class)!
   const currentClassImage = classImageForLevel(classDef, character.level)
@@ -232,6 +304,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const titleViews = getTitleViews(character)
   const codexEntries = getCodexEntries(character)
   const financialEvents = getFinancialEvents(character)
+  const bossRisk = calcBossRisk(character)
   const filteredEventLog = (character.eventLog ?? []).filter(entry => historyFilter === 'all' || entry.type === historyFilter)
   const equippedTitle = titleViews.find(title => title.equipped)
   const currentExploration = character.exploration ?? {
@@ -249,10 +322,14 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const ouroConsumido = calcOuroConsumido(character)
   const daysInCycle = calcDaysInCycle(character.cycleStart, character.cycleEnd)
   const daysLeft = calcDaysLeft(character.cycleEnd)
-  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, daysInCycle)
+  const quota = calcJourneyQuota(character.maxTreasure, character.journeyMarker, ouroConsumido, Math.max(1, daysLeft))
   const ouroPreservado = Math.max(0, character.maxTreasure - ouroConsumido)
   const spentPct = character.maxTreasure > 0 ? Math.min(100, Math.round((ouroConsumido / character.maxTreasure) * 100)) : 0
   const lifePct = character.maxLife > 0 ? Math.min(100, Math.round((character.life / character.maxLife) * 100)) : 0
+  const nextCycleTarget = character.nextCycleMaxTreasure ?? character.maxTreasure
+  const nextCycleGap = nextCycleTarget - ouroConsumido
+  const nextCycleGapAbs = Math.abs(nextCycleGap)
+  const nextCyclePct = nextCycleTarget > 0 ? Math.round((ouroConsumido / nextCycleTarget) * 100) : 0
 
   // Determine status color
   const getSpentColor = () => {
@@ -310,6 +387,13 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
     })
   }
 
+  const handleSaveNextCycleTarget = () => {
+    const parsed = Number(nextCycleTargetValue)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    onUpdateCharacter({ ...character, nextCycleMaxTreasure: parsed })
+    setEditingNextCycleTarget(false)
+  }
+
   const tabs = [
     { key: 'stats', label: 'Ficha' },
     { key: 'checkin', label: 'Ronda' },
@@ -348,10 +432,19 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
   const handleCheckin = () => {
     const result = performCheckin(character)
     const mission = result.ok ? completeMissionIfActive(result.character, 'checkin') : { character: result.character, awardedXP: 0 }
-    onUpdateCharacter(mission.character)
+    onUpdateCharacter(mission.character, { deferLevelUp: Boolean(result.reward) })
     setLastCheckin(result)
     setLastBattle(null)
     setBattleScreenOpen(false)
+    if (result.reward) {
+      setLootResult({
+        kind: 'checkin',
+        title: 'Recompensa da ronda',
+        message: result.message,
+        reward: result.reward,
+        missionMessage: mission.awardedXP > 0 ? mission.message : undefined,
+      })
+    }
     setActionMessage([
       result.reward ? `${result.message} ${rewardTitle(result.reward)}: ${result.reward.label}.` : result.message,
       mission.awardedXP > 0 ? mission.message : '',
@@ -371,18 +464,26 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
   const handleCompleteExploration = () => {
     const result = completeExplorationStep(character)
-    onUpdateCharacter(result.character)
+    onUpdateCharacter(result.character, { deferLevelUp: Boolean(result.reward) })
     setActionMessage(result.reward ? `${result.message} ${explorationRewardTitle(result.reward)}: ${result.reward.label}. +${result.reward.xpGained} XP.` : result.message)
     setLastBattle(null)
     setLastCheckin(null)
     setBattleScreenOpen(false)
+    if (result.reward) {
+      setLootResult({
+        kind: 'exploration',
+        title: 'Saque da exploração',
+        message: result.message,
+        reward: result.reward,
+      })
+    }
     setNowTick(Date.now())
   }
 
   const handleBattle = () => {
     const result = performBattle(character)
-    const mission = result.rounds.length > 0 ? completeMissionIfActive(result.character, 'battle') : { character: result.character, awardedXP: 0 }
-    onUpdateCharacter(mission.character)
+    const mission = result.rounds.length > 0 && !result.died ? completeMissionIfActive(result.character, 'battle') : { character: result.character, awardedXP: 0 }
+    onUpdateCharacter(mission.character, { deferLevelUp: result.rounds.length > 0 })
     setLastBattle(result)
     setVisibleBattleRounds(0)
     setBattleScreenOpen(result.rounds.length > 0)
@@ -530,8 +631,17 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                     <p className="text-xs text-muted-foreground">-{lastBattle.damageTaken} vida</p>
                   </div>
                 )}
+                {lastBattle.died && (
+                  <div className="rounded border border-destructive/40 bg-destructive/15 p-3 text-sm sm:col-span-2">
+                    <p className="font-semibold text-destructive">Personagem caiu</p>
+                    <p className="text-xs text-muted-foreground">Ele voltou ao nível 1, perdeu itens, equipamentos e progresso de exploração. O Baú do Ouro Preservado continua guardado.</p>
+                  </div>
+                )}
               </div>
-              <Button className="w-full" onClick={() => setBattleScreenOpen(false)}>
+              <Button className="w-full" onClick={() => {
+                setBattleScreenOpen(false)
+                onFlushPendingLevelUp()
+              }}>
                 Voltar para a ficha
               </Button>
             </section>
@@ -578,6 +688,15 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
       </header>
 
       <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
+        {lootResult && (
+          <LootResultModal
+            result={lootResult}
+            onClose={() => {
+              setLootResult(null)
+              onFlushPendingLevelUp()
+            }}
+          />
+        )}
 
         {/* Hero card */}
         <div className="dungeon-panel gold-frame bg-card border border-border rounded-lg p-5 space-y-4">
@@ -681,6 +800,89 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
             </div>
           )}
         </div>
+
+        <section className="grid gap-3 sm:grid-cols-3">
+          <div className="dungeon-panel bg-card border border-primary/30 rounded-lg p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Cota de hoje</p>
+            <p className="mt-1 text-xl font-bold text-primary">R$ {quota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Saldo vivo dividido pelos dias que restam.</p>
+          </div>
+          <div className="dungeon-panel bg-card border border-border rounded-lg p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Baú</p>
+            <p className="mt-1 text-xl font-bold text-primary">R$ {(character.goldChest ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Ouro preservado acumulado.</p>
+          </div>
+          <div className={`dungeon-panel bg-card border rounded-lg p-4 ${bossRisk.survives ? 'border-primary/30' : 'border-destructive/40'}`}>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Boss Final</p>
+            <p className={`mt-1 text-xl font-bold ${bossRisk.survives ? 'text-primary' : 'text-destructive'}`}>
+              {bossRisk.survives ? 'Sobrevive' : 'Cai'}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Dano estimado: -{bossRisk.damageTaken} vida{bossRisk.overLimit > 0 ? ` · acima do limite em R$ ${bossRisk.overLimit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{bossRisk.advice}</p>
+          </div>
+        </section>
+
+        <section className={`dungeon-panel bg-card border rounded-lg p-4 space-y-3 ${editingNextCycleTarget ? 'border-primary/45' : 'border-border'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Alvo do próximo ciclo</p>
+              <h3 className="font-semibold text-foreground">Edita aqui o próximo teto</h3>
+              <p className="text-xs text-muted-foreground mt-1">A mudança vale só para a próxima campanha. O ciclo atual continua intacto.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setNextCycleTargetValue(String(nextCycleTarget))
+                setEditingNextCycleTarget(prev => !prev)
+              }}
+              className="grid size-8 shrink-0 place-items-center rounded border border-border bg-black/35 text-muted-foreground hover:text-foreground"
+              aria-label="Editar alvo do próximo ciclo"
+            >
+              <Pencil className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 text-sm">
+            <div className="rounded border border-border bg-black/35 p-3">
+              <p className="text-xs text-muted-foreground">Alvo salvo</p>
+              <p className="mt-1 font-bold text-foreground">R$ {nextCycleTarget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className={`rounded border bg-black/35 p-3 ${nextCycleGap >= 0 ? 'border-primary/30' : 'border-destructive/30'}`}>
+              <p className="text-xs text-muted-foreground">{nextCycleGap >= 0 ? 'Falta para o alvo' : 'Passou do alvo'}</p>
+              <p className={`mt-1 font-bold ${nextCycleGap >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                R$ {nextCycleGapAbs.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="rounded border border-border bg-black/35 p-3">
+              <p className="text-xs text-muted-foreground">Leitura atual</p>
+              <p className={`mt-1 font-bold ${nextCycleGap >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                {nextCyclePct}% do alvo
+              </p>
+            </div>
+          </div>
+          {editingNextCycleTarget && (
+            <div className="space-y-2 rounded border border-primary/30 bg-primary/10 p-3">
+              <label className="text-xs text-muted-foreground block">Novo alvo para o próximo ciclo</label>
+              <input
+                type="number"
+                value={nextCycleTargetValue}
+                onChange={e => setNextCycleTargetValue(e.target.value)}
+                min="0"
+                className="w-full rounded border border-border bg-input px-3 py-2 text-foreground"
+              />
+              <p className="text-xs text-muted-foreground">Só o próximo ciclo vai usar esse valor quando o Boss Final começar a campanha seguinte.</p>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => setEditingNextCycleTarget(false)}>
+                  Cancelar
+                </Button>
+                <Button className="flex-1" onClick={handleSaveNextCycleTarget}>
+                  Salvar para o próximo ciclo
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* Tabs */}
         <div className="flex gap-2 overflow-x-auto border-b border-border pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -967,15 +1169,6 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">
-                    Cota de Jornada (por dia)
-                    <InfoTooltip text="Quanto você poderia gastar por dia para permanecer dentro do limite até o final do ciclo." />
-                  </span>
-                  <span className="font-bold text-secondary">
-                    R$ {quota.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
                     Baú do Ouro Preservado
                     <InfoTooltip text="Ouro simbólico acumulado dos ciclos em que você ficou abaixo do limite." />
                   </span>
@@ -1067,7 +1260,7 @@ export default function CharacterDetailPage({ character, onBack, onUpdateCharact
 
             {/* CTA Ritual */}
             {(() => {
-              const today = new Date().toISOString().split('T')[0]
+              const today = dateToISO()
               const registeredToday = character.dailyRecords.some(r => r.date === today)
               return (
                 <Button
